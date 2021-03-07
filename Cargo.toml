@@ -1,0 +1,6 @@
+[workspace]
+members = [ "xtask" ]
+
+[profile.release]
+debug = true
+lto = "fat"
