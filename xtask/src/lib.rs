@@ -36,6 +36,12 @@ pub fn root() -> PathBuf {
     env!("CARGO_MANIFEST_DIR").into()
 }
 
+/// Build OpenSBI firmware
+pub fn opensbi() -> Result<()> {
+    cmd!("nix-build nix/opensbi.nix").run()?;
+    Ok(())
+}
+
 /// Build the NovOS kernel using the given configuration.
 pub fn build(cfg: Config) -> Result<()> {
     let _flags = xshell::pushenv("RUSTFLAGS", "-Clink-arg=-Tcrates/kernel/lds/qemu.lds");
@@ -70,11 +76,10 @@ pub fn run(cfg: Config) -> Result<()> {
             -cpu rv64
             -smp {cpus}
             -m {ram}
-            -bios opensbi-riscv64-generic-fw_jump.bin 
+            -nographic
+            -bios result/platform/fw_jump.bin
             -kernel {path}
-            -monitor stdio
             -gdb tcp::1234
-            -S 
             {debug...}
     "
     )

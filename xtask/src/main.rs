@@ -8,7 +8,7 @@ fn main() -> color_eyre::Result<()> {
     let args = Arguments::parse();
 
     match args {
-        Arguments::OpenSBI => todo!(),
+        Arguments::OpenSBI => xtask::opensbi()?,
         Arguments::Run(cfg) => {
             xtask::build(cfg.clone())?;
             xtask::run(cfg)?;
