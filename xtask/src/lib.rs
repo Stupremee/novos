@@ -38,9 +38,13 @@ pub fn root() -> PathBuf {
 
 /// Build the NovOS kernel using the given configuration.
 pub fn build(cfg: Config) -> Result<()> {
+    let _flags = xshell::pushenv("RUSTFLAGS", "-Clink-arg=-Tcrates/kernel/lds/qemu.lds");
     let release = if cfg.release { &["--release"] } else { &[][..] };
 
-    cmd!("cargo build -p kernel {release...}").run()?;
+    cmd!(
+        "cargo build --target riscv64gc-unknown-none-elf -Zbuild-std=core -p kernel {release...}"
+    )
+    .run()?;
     Ok(())
 }
 
