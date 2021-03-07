@@ -1,2 +1,2 @@
 [alias]
-xtask = "run --release -p xtask --"
+xtask = "run -p xtask --"
