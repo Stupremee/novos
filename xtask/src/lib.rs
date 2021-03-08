@@ -33,7 +33,9 @@ pub struct Config {
 
 /// Returns the path to the root of the project.
 pub fn root() -> PathBuf {
-    env!("CARGO_MANIFEST_DIR").into()
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.pop();
+    path
 }
 
 /// Build OpenSBI firmware
@@ -58,7 +60,7 @@ pub fn build(cfg: Config) -> Result<()> {
 pub fn run(cfg: Config) -> Result<()> {
     let cpus = cfg.cpus.to_string();
     let ram = cfg.ram;
-    let debug = if cfg.release {
+    let debug = if cfg.debug {
         &["-d", "guest_errors,trace:riscv_trap,int"]
     } else {
         &[][..]

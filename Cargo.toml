@@ -1,5 +1,5 @@
 [workspace]
-members = ["xtask", "crates/kernel"]
+members = ["xtask", "crates/*"]
 
 [profile.release]
 debug = true
