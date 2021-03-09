@@ -6,4 +6,3 @@ authors = ["Justus K <justus.k@protonmail.com>"]
 edition = "2018"
 
 [dependencies]
-spinning_top = { version = "0.2", features = ["nightly"] }
