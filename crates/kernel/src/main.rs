@@ -3,5 +3,7 @@
 #![no_main]
 #![feature(asm, naked_functions)]
 
+pub mod drivers;
+
 mod boot;
 mod panic;

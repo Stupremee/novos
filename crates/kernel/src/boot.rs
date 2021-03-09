@@ -1,14 +1,38 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
+use crate::drivers::{ns16550a, DeviceTreeDriver};
 use devicetree::DeviceTree;
 
 /// The code that sets up memory stuff,
 /// allocates a new stack and then runs the real main function.
 #[no_mangle]
-unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
+unsafe extern "C" fn _before_main(_hart_id: usize, fdt: *const u8) -> ! {
     let fdt = DeviceTree::from_ptr(fdt).expect("failed to parse device tree");
 
-    sbi::system::shutdown().unwrap()
+    // try to find a uart device, and then set it as the global logger
+    if let Some(uart) = ns16550a::Uart::from_chosen(fdt.chosen()) {
+        match log::init_log(uart) {
+            Ok(_) => log::info!(
+                "{} the global logging system using UART.",
+                "Initialized".green()
+            ),
+            // special case, we will instantly shutdown if we failed to initialize the logger
+            // this is a pseudo panic since panic wont print anything
+            Err(mut uart) => {
+                use core::fmt::Write;
+
+                // FIXME: Use colors here
+                write!(
+                    uart,
+                    "Failed to initialize the global logger. Shutting down..."
+                )
+                .unwrap();
+                sbi::system::shutdown();
+            }
+        }
+    }
+
+    sbi::system::shutdown()
 }
 
 /// The entrypoint for the whole kernel.
