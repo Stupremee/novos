@@ -1,5 +1,7 @@
 //! Safe wrappers around some assembly instructions.
 
+use core::time::Duration;
+
 /// Wrapper around the `wfi` instruction.
 #[inline]
 pub fn wfi() {
@@ -41,4 +43,10 @@ pub fn sfence(addr: impl Into<Option<usize>>, asid: impl Into<Option<u16>>) {
             (None, None) => asm!("sfence.vma x0, x0"),
         }
     }
+}
+
+/// Return the uptime of this hart.
+pub fn time() -> Duration {
+    let time = rdtime();
+    Duration::from_nanos(time as u64 * 100)
 }

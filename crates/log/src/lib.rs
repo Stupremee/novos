@@ -7,17 +7,141 @@
 mod value;
 pub use value::Value;
 
-#[cfg(test)]
-mod tests {
-    extern crate std;
-    use std::string::ToString;
+#[macro_use]
+mod macros;
 
-    use super::Value;
+use core::fmt::{self, Write};
+use core::marker::PhantomData;
+use core::time::Duration;
+use owo_colors::{colors, Color, OwoColorize};
 
-    #[test]
-    fn it_works() {
-        let x = 32u32;
-        let y = Value::<dyn core::fmt::Display, 2>::new(x).unwrap();
-        assert_eq!(y.to_string(), "32");
+use riscv::sync::Mutex;
+
+const LOGGER_SIZE: usize = 8;
+static LOG: GlobalLogger = GlobalLogger(Mutex::new(None));
+
+struct GlobalLogger(Mutex<Option<Value<dyn Write, { LOGGER_SIZE }>>>);
+
+unsafe impl Send for GlobalLogger {}
+unsafe impl Sync for GlobalLogger {}
+
+#[doc(hidden)]
+pub mod __export {
+    pub use owo_colors;
+}
+
+/// Represents anything that can be used to log the log events to some output.
+pub trait Logger {}
+
+/// Represents any level of a log message.
+pub trait Level {
+    type Color: Color;
+
+    const NAME: &'static str;
+}
+
+/// The debug log level.
+pub enum Debug {}
+impl Level for Debug {
+    type Color = colors::Magenta;
+    const NAME: &'static str = "Debug";
+}
+
+/// The info log level.
+pub enum Info {}
+impl Level for Info {
+    type Color = colors::Cyan;
+    const NAME: &'static str = "Info";
+}
+
+/// The warn log level.
+pub enum Warn {}
+impl Level for Warn {
+    type Color = colors::Yellow;
+    const NAME: &'static str = "Warn";
+}
+
+/// The error log level.
+pub enum Error {}
+impl Level for Error {
+    type Color = colors::Red;
+    const NAME: &'static str = "Error";
+}
+
+struct LogWriter<'fmt, L> {
+    prefix: bool,
+    time: Duration,
+    module: &'fmt str,
+    _guard: &'fmt mut dyn Write,
+    _level: PhantomData<L>,
+}
+
+impl<L: Level> LogWriter<'_, L> {
+    fn print_prefix(&mut self) -> fmt::Result {
+        let secs = self.time.as_secs();
+        let millis = self.time.subsec_millis();
+        write!(
+            self._guard,
+            "{} {:>5} {} > ",
+            format_args!("[{:>3}.{:<03}]", secs, millis).dimmed(),
+            L::NAME.fg::<L::Color>(),
+            self.module,
+        )
     }
+}
+
+impl<L: Level> fmt::Write for LogWriter<'_, L> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        if self.prefix {
+            self.print_prefix()?;
+            self.prefix = false;
+        }
+
+        if let Some(newline) = s.find('\n') {
+            let (s, rest) = s.split_at(newline + 1);
+            self._guard.write_str(s)?;
+
+            if !rest.is_empty() {
+                self.print_prefix()?;
+                self._guard.write_str(rest)?;
+            } else {
+                self.prefix = true;
+            }
+        } else {
+            self._guard.write_str(s)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[doc(hidden)]
+pub fn log<L: Level>(module: &str, args: fmt::Arguments<'_>) {
+    if let Some(log) = &mut *LOG.0.lock() {
+        let mut writer = LogWriter {
+            time: riscv::asm::time(),
+            prefix: true,
+            module,
+            _guard: &mut **log,
+            _level: PhantomData::<L>,
+        };
+
+        writeln!(writer, "{}", args).expect("failed to log message");
+    }
+}
+
+/// Initializes the global logger.
+///
+/// Returns `Ok` on success, and `Err` with the given logger if the logger was already initialized,
+/// or the given logger was to big to be put into a global.
+pub fn init_log<L: Write + Send + Sync + 'static>(log: L) -> Result<(), L> {
+    let mut lock = LOG.0.lock();
+    if lock.is_some() {
+        return Err(log);
+    }
+
+    let val = Value::<dyn Write, { LOGGER_SIZE }>::new(log)?;
+    *lock = Some(val);
+
+    Ok(())
 }
