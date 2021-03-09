@@ -1,6 +1,6 @@
 use super::{align_up, Error, Result};
 use crate::LinkedList;
-use core::{cmp, mem, ptr, ptr::NonNull};
+use core::{cmp, ptr, ptr::NonNull};
 
 /// The maximum order for the buddy allocator (inclusive).
 ///
@@ -57,9 +57,9 @@ impl BuddyAllocator {
     ///
     /// `start` and `end` must be valid to write for the entire lifetime of this allocator.
     pub unsafe fn add_region(&mut self, start: NonNull<u8>, end: NonNull<u8>) -> Result<usize> {
-        // align the pointer
+        // align the pointer to the page size
         let start = start.as_ptr();
-        let mut start = align_up(start as _, mem::align_of::<usize>()) as *mut u8;
+        let mut start = align_up(start as _, super::PAGE_SIZE) as *mut u8;
         let end = end.as_ptr();
 
         // check if there's enough memory for at least

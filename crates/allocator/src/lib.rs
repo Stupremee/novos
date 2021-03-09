@@ -12,6 +12,8 @@ pub use buddy::BuddyAllocator;
 pub mod linked_list;
 pub use linked_list::LinkedList;
 
+pub mod slab;
+
 use displaydoc_lite::displaydoc;
 
 /// The size of a single page in memory.
