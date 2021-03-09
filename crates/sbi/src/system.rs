@@ -59,5 +59,10 @@ pub fn reset(type_: Type, reason: Reason) -> SbiResult<!> {
 
 /// Shuts down the system with no reason.
 pub fn shutdown() -> ! {
-    reset(Type::Shutdown, Reason::NoReason).unwrap();
+    reset(Type::Shutdown, Reason::NoReason).unwrap()
+}
+
+/// Shuts down the system with the system failure reason.
+pub fn fail_shutdown() -> ! {
+    reset(Type::Shutdown, Reason::SystemFailure).unwrap()
 }
