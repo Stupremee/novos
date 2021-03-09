@@ -4,8 +4,4 @@
 #![feature(asm, naked_functions)]
 
 mod boot;
-
-#[panic_handler]
-fn _p(_: &core::panic::PanicInfo<'_>) -> ! {
-    loop {}
-}
+mod panic;

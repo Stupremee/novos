@@ -1,10 +1,14 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
+use devicetree::DeviceTree;
+
 /// The code that sets up memory stuff,
 /// allocates a new stack and then runs the real main function.
 #[no_mangle]
-unsafe extern "C" fn _before_main() -> ! {
-    loop {}
+unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
+    let fdt = DeviceTree::from_ptr(fdt).expect("failed to parse device tree");
+
+    sbi::system::shutdown().unwrap()
 }
 
 /// The entrypoint for the whole kernel.

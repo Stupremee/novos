@@ -5,7 +5,7 @@ in pkgs.mkShell {
   nativeBuildInputs = with pkgs; [
     rust
     llvm_11
-    qemu
+    unstable.qemu
     python3
     dtc
     cargo-expand
