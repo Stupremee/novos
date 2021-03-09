@@ -14,6 +14,7 @@ fn main() -> color_eyre::Result<()> {
             xtask::run(cfg)?;
         }
         Arguments::Build(cfg) => xtask::build(cfg)?,
+        Arguments::Watch => xtask::watch()?,
     }
 
     Ok(())

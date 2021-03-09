@@ -12,6 +12,8 @@ pub enum Arguments {
     Run(Config),
     /// Build NovOS without running it.
     Build(Config),
+    /// Run cargo-watch and check every project
+    Watch,
 }
 
 /// Configure QEMU and build of NovOS.
@@ -86,6 +88,33 @@ pub fn run(cfg: Config) -> Result<()> {
     "
     )
     .run()?;
+
+    Ok(())
+}
+
+pub fn watch() -> Result<()> {
+    let metadata = cmd!("cargo metadata").read()?;
+    let crates = cmd!("jq -r '.packages | .[].manifest_path'")
+        .stdin(metadata)
+        .read()?;
+
+    let mut args = vec![];
+
+    for c in crates.lines() {
+        if c.starts_with(xshell::cwd()?.to_str().unwrap()) && !c.contains("xtask") {
+            let mut pkg = PathBuf::from(c);
+            pkg.pop();
+            let pkg = pkg.file_name().unwrap();
+
+            let arg = format!(
+                "-x clippy -p {} --target riscv64gc-unknown-none-elf",
+                pkg.to_str().unwrap()
+            );
+            args.push(arg);
+        }
+    }
+
+    cmd!("cargo watch -c {args...}").run()?;
 
     Ok(())
 }
