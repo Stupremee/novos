@@ -93,27 +93,7 @@ pub fn run(cfg: Config) -> Result<()> {
 }
 
 pub fn watch() -> Result<()> {
-    let metadata = cmd!("cargo metadata").read()?;
-    let crates = cmd!("jq -r '.packages | .[].manifest_path'")
-        .stdin(metadata)
-        .read()?;
-
-    let mut args = vec![];
-
-    for c in crates.lines() {
-        if c.starts_with(xshell::cwd()?.to_str().unwrap()) && !c.contains("xtask") {
-            let mut pkg = PathBuf::from(c);
-            pkg.pop();
-            let pkg = pkg.file_name().unwrap();
-
-            let arg = format!("-x clippy -p {}", pkg.to_str().unwrap());
-            args.push(arg);
-            let arg = format!("-x doc -p {}", pkg.to_str().unwrap());
-            args.push(arg);
-        }
-    }
-
-    cmd!("cargo watch -c {args...}").run()?;
+    cmd!("cargo watch -c -x 'clippy -p kernel' -x 'doc -p kernel'").run()?;
 
     Ok(())
 }
