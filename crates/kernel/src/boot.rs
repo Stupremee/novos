@@ -52,20 +52,6 @@ unsafe extern "C" fn _before_main(_hart_id: usize, fdt2: *const u8) -> ! {
     let new_fdt = slice::from_raw_parts_mut(new_fdt.as_ptr(), size_for_order(fdt_order));
     let fdt = fdt.copy_to_slice(new_fdt);
 
-    let mut table = page::sv39::Table::new();
-    table
-        .map(
-            0x1000_0000.into(),
-            0xFFFF_FFFF_1000_0000.into(),
-            page::PageSize::Kilopage,
-            page::Perm::READ,
-        )
-        .unwrap();
-
-    log::info!("{:#x?}", table.translate(0xFFFF_FFFF_1000_0000.into()));
-    table.unmap(0xFFFF_FFFF_1000_0000.into()).unwrap();
-    log::info!("{:#x?}", table.translate(0xFFFF_FFFF_1000_0000.into()));
-
     sbi::system::shutdown()
 }
 

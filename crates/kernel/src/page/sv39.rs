@@ -65,9 +65,9 @@ impl Table {
             table_kib,
             entry,
             size: match idx {
-                0 => PageSize::Gigapage,
+                0 => PageSize::Kilopage,
                 1 => PageSize::Megapage,
-                2 => PageSize::Kilopage,
+                2 => PageSize::Gigapage,
                 _ => unreachable!(),
             },
         })
