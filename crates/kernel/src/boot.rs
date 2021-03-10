@@ -1,16 +1,19 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
 use crate::drivers::{ns16550a, DeviceTreeDriver};
+use crate::pmem;
+use allocator::{order_for_size, size_for_order};
+use core::slice;
 use devicetree::DeviceTree;
 
 /// The code that sets up memory stuff,
 /// allocates a new stack and then runs the real main function.
 #[no_mangle]
-unsafe extern "C" fn _before_main(_hart_id: usize, fdt: *const u8) -> ! {
-    let fdt = DeviceTree::from_ptr(fdt).expect("failed to parse device tree");
+unsafe extern "C" fn _before_main(_hart_id: usize, fdt2: *const u8) -> ! {
+    let fdt = DeviceTree::from_ptr(fdt2).unwrap();
 
     // try to find a uart device, and then set it as the global logger
-    if let Some(uart) = ns16550a::Uart::from_chosen(fdt.chosen()) {
+    if let Some(uart) = ns16550a::Device::from_chosen(fdt.chosen()) {
         match log::init_log(uart) {
             Ok(_) => log::info!(
                 "{} the global logging system using UART.",
@@ -27,10 +30,24 @@ unsafe extern "C" fn _before_main(_hart_id: usize, fdt: *const u8) -> ! {
                     "Failed to initialize the global logger. Shutting down..."
                 )
                 .unwrap();
-                sbi::system::shutdown();
+                sbi::system::fail_shutdown();
             }
         }
     }
+
+    // initialize the physmem allocator
+    pmem::init(&fdt).unwrap();
+
+    // copy the devicetree to a newly allocated physical page
+    let fdt_order = order_for_size(fdt.total_size() as usize);
+    let new_fdt = pmem::alloc_order(fdt_order).unwrap();
+    assert_ne!(
+        (new_fdt.as_ptr() as usize) >> 12,
+        (&fdt as *const _ as usize) >> 12,
+    );
+
+    let new_fdt = slice::from_raw_parts_mut(new_fdt.as_ptr(), size_for_order(fdt_order));
+    let fdt = fdt.copy_to_slice(new_fdt);
 
     sbi::system::shutdown()
 }

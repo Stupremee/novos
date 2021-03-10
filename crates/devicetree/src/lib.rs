@@ -8,7 +8,7 @@ use self::{
     node::Node,
     parse::{Token, TokenIter},
 };
-use core::{cell::Cell, convert::TryInto, marker::PhantomData, ops::Not};
+use core::{convert::TryInto, ops::Not};
 
 /// The magic number, which is the first 4 bytes in every device tree.
 const MAGIC: u32 = 0xD00DFEED;
@@ -30,11 +30,9 @@ impl From<PHandle> for u32 {
 }
 
 /// The central structure for working with a flattened device tree.
+#[repr(transparent)]
 pub struct DeviceTree<'tree> {
     buf: &'tree [u8],
-
-    // Is this really required?
-    _send_sync: PhantomData<Cell<u8>>,
 }
 
 impl<'tree> DeviceTree<'tree> {
@@ -66,15 +64,19 @@ impl<'tree> DeviceTree<'tree> {
 
         // create the slice and return the tree
         let buf = core::slice::from_raw_parts(ptr, size as usize);
-        Some(Self {
-            buf,
-            _send_sync: PhantomData,
-        })
+        Some(Self { buf })
     }
 
     /// Return a raw pointer to the buffer of this device tree.
     pub fn as_ptr(&self) -> *const u8 {
         self.buf.as_ptr()
+    }
+
+    /// Consumes this devicetree, copies the raw data of this tree into the buffer,
+    /// and returns a reference to the new devicetree.
+    pub fn copy_to_slice(self, buf: &mut [u8]) -> DeviceTree<'_> {
+        buf[..self.buf.len()].copy_from_slice(self.buf);
+        DeviceTree { buf }
     }
 
     /// Return an iterator over all elemens inside the memory reservations block
