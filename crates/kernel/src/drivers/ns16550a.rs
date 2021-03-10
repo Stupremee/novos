@@ -3,11 +3,11 @@
 use core::{fmt, ptr::NonNull};
 use devicetree::node::ChosenNode;
 
-pub struct Uart {
+pub struct Device {
     base: NonNull<u8>,
 }
 
-impl Uart {
+impl Device {
     /// Initialize this UART driver.
     pub fn init(&mut self) {
         let ptr = self.base.as_ptr();
@@ -132,10 +132,10 @@ impl Uart {
     }
 }
 
-unsafe impl Send for Uart {}
-unsafe impl Sync for Uart {}
+unsafe impl Send for Device {}
+unsafe impl Sync for Device {}
 
-impl fmt::Write for Uart {
+impl fmt::Write for Device {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for x in s.bytes() {
             self.write(x);
@@ -144,7 +144,7 @@ impl fmt::Write for Uart {
     }
 }
 
-impl super::DeviceTreeDriver for Uart {
+impl super::DeviceTreeDriver for Device {
     const COMPATIBLE: &'static [&'static str] = &["ns16550a", "ns16550"];
 
     fn from_chosen(node: ChosenNode<'_>) -> Option<Self> {
@@ -156,7 +156,7 @@ impl super::DeviceTreeDriver for Uart {
         }
 
         let base = stdout.regions().next()?.start();
-        let mut uart = Uart {
+        let mut uart = Device {
             base: NonNull::new(base as *mut _)?,
         };
         uart.init();

@@ -7,10 +7,13 @@
 #![no_std]
 
 pub mod buddy;
-pub use buddy::BuddyAllocator;
+pub use buddy::{order_for_size, size_for_order, BuddyAllocator};
 
 pub mod linked_list;
 pub use linked_list::LinkedList;
+
+pub mod rangeset;
+pub use rangeset::RangeSet;
 
 pub mod slab;
 

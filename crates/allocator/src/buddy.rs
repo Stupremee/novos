@@ -1,6 +1,6 @@
 use super::{align_up, Error, Result};
 use crate::LinkedList;
-use core::{cmp, ptr, ptr::NonNull};
+use core::{cmp, ptr::NonNull};
 
 /// The maximum order for the buddy allocator (inclusive).
 ///
@@ -95,7 +95,7 @@ impl BuddyAllocator {
 
         // loop until we reached the maximum order
         let mut order = 0;
-        while order < MAX_ORDER {
+        while order < (MAX_ORDER - 1) {
             // calculate the size for the next order,
             // so we can break if another order doesn't fit.
             let size = size_for_order(order + 1);
@@ -125,7 +125,7 @@ impl BuddyAllocator {
     /// Allocates a chunk of memory that has the given order.
     ///
     /// The size for returned chunk can be calculated using [`size_for_order`].
-    pub fn allocate(&mut self, order: usize) -> Result<NonNull<[u8]>> {
+    pub fn allocate(&mut self, order: usize) -> Result<NonNull<u8>> {
         // check if we exceeded the maximum order
         if order > MAX_ORDER {
             return Err(Error::OrderTooLarge);
@@ -134,11 +134,7 @@ impl BuddyAllocator {
         // fast path: if there's a block with the given order,
         // return it
         if let Some(block) = self.orders[order].pop() {
-            let len = size_for_order(order);
-            let ptr = NonNull::new(ptr::slice_from_raw_parts_mut(block.as_ptr().cast(), len))
-                .ok_or(Error::NullPointer)?;
-
-            return Ok(ptr);
+            return NonNull::new(block.as_ptr().cast()).ok_or(Error::NullPointer);
         }
 
         // slow path: walk up the order list and split required buddies.
@@ -153,7 +149,7 @@ impl BuddyAllocator {
         //
         // the addresses of two buddies only differe in one bit, thus we
         // can easily get the address of a buddy, if we have the other buddy.
-        let buddy = buddy_of(block.as_non_null_ptr().cast(), order)?;
+        let buddy = buddy_of(block.cast(), order)?;
 
         // push the second buddy to the free list
         unsafe { self.orders[order].push(buddy) };
