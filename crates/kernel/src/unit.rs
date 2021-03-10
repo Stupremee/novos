@@ -27,14 +27,15 @@ where
     I: Into<usize> + Copy,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let count = Into::<usize>::into(self.0);
+        let this = Into::<usize>::into(self.0);
+        let count = this as f32;
 
-        match count {
-            0..KIB => write!(f, "{} B", count)?,
-            KIB..MIB => write!(f, "{:.2} KiB", count / KIB)?,
-            MIB..GIB => write!(f, "{:.2} MiB", count / MIB)?,
-            GIB..TIB => write!(f, "{:.2} GiB", count / GIB)?,
-            _ => write!(f, "{:.2} TiB", count / TIB)?,
+        match this {
+            0..KIB => write!(f, "{} B", this)?,
+            KIB..MIB => write!(f, "{:.2} KiB", count / KIB as f32)?,
+            MIB..GIB => write!(f, "{:.2} MiB", count / MIB as f32)?,
+            GIB..TIB => write!(f, "{:.2} GiB", count / GIB as f32)?,
+            _ => write!(f, "{:.2} TiB", count / TIB as f32)?,
         };
 
         Ok(())

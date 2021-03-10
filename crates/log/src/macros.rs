@@ -43,25 +43,3 @@ macro_rules! log {
         $crate::log::<$crate::$level>(::core::module_path!(), ::core::format_args!($($args)*));
     }};
 }
-
-/// Custom implementation of the `dbg` macro.
-#[macro_export]
-macro_rules! dbg {
-    () => {
-        $crate::debug!("[{}:{}]", ::core::file!(), ::core::line!());
-    };
-
-    ($val:expr $(,)?) => {
-        match $val {
-            tmp => {
-                $crate::debug!("[{}:{}] {} = {:#x?}", ::core::file!(), ::core::line!(),
-                    ::core::stringify!($val), &tmp);
-                tmp
-            }
-        }
-    };
-
-    ($($val:expr),+ $(,)?) => {
-        ($($crate::dbg!($val)),+,)
-    };
-}
