@@ -107,7 +107,14 @@ pub fn alloc() -> Result<NonNull<u8>, allocator::Error> {
 /// Allocate a region of memory with the given order.
 #[inline]
 pub fn alloc_order(order: usize) -> Result<NonNull<u8>, allocator::Error> {
-    PHYS_MEM.0.lock().allocate(order)
+    let res = PHYS_MEM.0.lock().allocate(order)?;
+    log::debug!(
+        "{} region {:p} with order {}",
+        "Allocated".cyan(),
+        res,
+        order
+    );
+    Ok(res)
 }
 
 /// Allocate a single page of physical memory and zero it.
@@ -150,5 +157,7 @@ pub unsafe fn free(ptr: NonNull<u8>) -> Result<(), allocator::Error> {
 /// The order *must* be the same as the order that the pointer was allocated with.
 #[inline]
 pub unsafe fn free_order(ptr: NonNull<u8>, order: usize) -> Result<(), allocator::Error> {
-    PHYS_MEM.0.lock().deallocate(ptr, order)
+    PHYS_MEM.0.lock().deallocate(ptr, order)?;
+    log::debug!("{} region {:p} with order {}", "Freed".yellow(), ptr, order);
+    Ok(())
 }

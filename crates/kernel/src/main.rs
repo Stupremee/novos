@@ -4,6 +4,7 @@
 #![feature(asm, naked_functions, panic_info_message, exclusive_range_pattern)]
 
 pub mod drivers;
+pub mod page;
 pub mod pmem;
 pub mod unit;
 
