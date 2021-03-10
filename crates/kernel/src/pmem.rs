@@ -131,3 +131,24 @@ pub fn zalloc_order(order: usize) -> Result<NonNull<u8>, allocator::Error> {
 
     Ok(page)
 }
+
+/// Free a single page that was allocated using the order 0.
+///
+/// # Safety
+///
+/// The pointer *must* be allocated through one of the allocation methods in this module.
+#[inline]
+pub unsafe fn free(ptr: NonNull<u8>) -> Result<(), allocator::Error> {
+    free_order(ptr, 0)
+}
+
+/// Free a single page that was allocated using the given order.
+///
+/// # Safety
+///
+/// The pointer *must* be allocated through one of the allocation methods in this module.
+/// The order *must* be the same as the order that the pointer was allocated with.
+#[inline]
+pub unsafe fn free_order(ptr: NonNull<u8>, order: usize) -> Result<(), allocator::Error> {
+    PHYS_MEM.0.lock().deallocate(ptr, order)
+}
