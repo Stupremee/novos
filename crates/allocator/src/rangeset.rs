@@ -36,7 +36,7 @@ impl Range {
 
 /// A fixed-size set of inclusive [ranges](Range).
 ///
-/// To effectively use a [`RangeSet`], [push](RangeSet::push) all requested
+/// To effectively use a [`RangeSet`], [insert](RangeSet::insert) all requested
 /// memory regions into this set, and [remove](RangeSet::remove) all ranges
 /// that should not be part of the allocator.
 #[derive(Clone)]

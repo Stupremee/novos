@@ -106,10 +106,9 @@ pub fn watch() -> Result<()> {
             pkg.pop();
             let pkg = pkg.file_name().unwrap();
 
-            let arg = format!(
-                "-x clippy -p {} --target riscv64gc-unknown-none-elf",
-                pkg.to_str().unwrap()
-            );
+            let arg = format!("-x clippy -p {}", pkg.to_str().unwrap());
+            args.push(arg);
+            let arg = format!("-x doc -p {}", pkg.to_str().unwrap());
             args.push(arg);
         }
     }
