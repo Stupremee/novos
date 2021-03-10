@@ -79,7 +79,7 @@ impl Table {
     }
 
     /// Deallocate the underlying memory of this table through the reference.
-    unsafe fn free(&self) -> Result<(), Error> {
+    unsafe fn free_mem(&self) -> Result<(), Error> {
         let page = NonNull::new(self as *const _ as *mut u8).unwrap();
         pmem::free(page).map_err(Error::Alloc)
     }
@@ -107,7 +107,6 @@ impl super::PageTable for Table {
             PageSize::Kilopage => (&vpns[1..], vpns[0]),
             PageSize::Megapage => (&vpns[2..], vpns[1]),
             PageSize::Gigapage => (&vpns[3..], vpns[2]),
-            PageSize::Terapage => return Err(Error::UnsupportedPageSize),
         };
 
         // represent the current table that is walked.
@@ -139,12 +138,18 @@ impl super::PageTable for Table {
             }
         }
 
+        // if the entry is a leaf, aka already mapped, return an error
+        let mut entry = &mut table.entries[last_idx];
+        if matches!(entry.kind(), Some(EntryKind::Leaf)) {
+            return Err(Error::AlreadyMapped);
+        }
+
         // if we reach this point, `table` is the table where the mapping should be created,
         // and `last_idx` is the index inside the table where the mapping should be placed
         //
         // so just construct the new entry, and insert it
         let new_entry = (ppn << 10) | (usize::from(perm) << 1) | Entry::VALID as usize;
-        table.entries[last_idx].set(new_entry as u64);
+        entry.set(new_entry as u64);
 
         Ok(())
     }
@@ -181,7 +186,7 @@ impl super::PageTable for Table {
                 table_mib.as_mut().unwrap().entries[vpn[1]].set(0);
 
                 unsafe {
-                    table.free()?;
+                    table.free_mem()?;
                 }
             }
         }
@@ -193,7 +198,7 @@ impl super::PageTable for Table {
                 // we also need to remove the entry from the level 0 table
                 self.entries[vpn[2]].set(0);
                 unsafe {
-                    table.free()?;
+                    table.free_mem()?;
                 }
             }
         }
@@ -212,7 +217,6 @@ impl super::PageTable for Table {
                 PageSize::Kilopage => off & 0xFFF,
                 PageSize::Megapage => off & 0x1FFFFF,
                 PageSize::Gigapage => off & 0x3FFFFFFF,
-                PageSize::Terapage => unreachable!(),
             };
 
             // get the physical page number specified by the PTE

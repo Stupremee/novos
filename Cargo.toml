@@ -4,3 +4,5 @@ members = ["xtask", "crates/*"]
 [profile.release]
 debug = true
 lto = "fat"
+overflow-checks = true
+debug-assertions = true

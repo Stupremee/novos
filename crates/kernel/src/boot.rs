@@ -52,6 +52,31 @@ unsafe extern "C" fn _before_main(_hart_id: usize, fdt2: *const u8) -> ! {
     let new_fdt = slice::from_raw_parts_mut(new_fdt.as_ptr(), size_for_order(fdt_order));
     let fdt = fdt.copy_to_slice(new_fdt);
 
+    let mut table = page::sv39::Table::new();
+
+    //log::info!("{:#x?}", table.translate(0xFFFF_0000.into()));
+
+    table
+        .map_alloc(
+            0xFFFF_0000.into(),
+            4,
+            page::PageSize::Kilopage,
+            page::Perm::READ,
+        )
+        .unwrap();
+    log::info!("-----");
+    table
+        .map_alloc(
+            0xFFFA_0000.into(),
+            4,
+            page::PageSize::Kilopage,
+            page::Perm::READ,
+        )
+        .unwrap();
+    log::info!("-----");
+    table.free(0xFFFA_0000.into(), 4).unwrap();
+    table.free(0xFFFF_0000.into(), 4).unwrap();
+
     sbi::system::shutdown()
 }
 
