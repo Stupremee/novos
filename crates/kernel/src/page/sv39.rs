@@ -93,6 +93,12 @@ impl super::PageTable for Table {
         size: PageSize,
         perm: Perm,
     ) -> Result<(), Error> {
+        // check if thej
+        assert!(
+            usize::from(vaddr) <= 0x7F_FFFF_FFFF,
+            "virtual address exceeded 39 bits"
+        );
+
         // verify the given addresses
         if !size.is_aligned(paddr.into()) || !size.is_aligned(vaddr.into()) {
             return Err(Error::UnalignedAddress);

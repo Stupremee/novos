@@ -10,3 +10,14 @@ pub mod unit;
 
 mod boot;
 mod panic;
+
+/// The base virtual addresses where the stacks for every hart are located.
+pub const KERNEL_STACK_BASE: usize = 0x000A_AAA0_0000;
+
+/// The stack size for each hart.
+pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
+
+/// The virtual address at which the physical memory is mapped in, such that adding
+/// this constant to any "real" physaddr returns the new physaddr which can be used if
+/// paging is activaed.
+pub const KERNEL_PHYS_MEM_BASE: usize = 0x001F_FF00_0000;

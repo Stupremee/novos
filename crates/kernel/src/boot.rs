@@ -2,8 +2,8 @@
 
 use crate::drivers::{ns16550a, DeviceTreeDriver};
 use crate::{
-    page::{self, PageTable},
-    pmem,
+    page::{self, PageSize, PageTable, Perm},
+    pmem, unit, KERNEL_PHYS_MEM_BASE, KERNEL_STACK_BASE, KERNEL_STACK_SIZE,
 };
 use allocator::{order_for_size, size_for_order};
 use core::slice;
@@ -54,28 +54,32 @@ unsafe extern "C" fn _before_main(_hart_id: usize, fdt2: *const u8) -> ! {
 
     let mut table = page::sv39::Table::new();
 
-    //log::info!("{:#x?}", table.translate(0xFFFF_0000.into()));
+    // get all available physical memory from the devicetree and map it
+    // at the physmem base
+    let phys_mem = fdt.memory().regions().next().unwrap();
+    for page in (phys_mem.start()..phys_mem.end()).step_by(2 * unit::MIB) {
+        let vaddr = page + KERNEL_PHYS_MEM_BASE;
+        log::info!("Mapping physmem {:#x?} to {:#x?}", page, vaddr);
+        table
+            .map(
+                page.into(),
+                vaddr.into(),
+                PageSize::Megapage,
+                Perm::READ | Perm::WRITE,
+            )
+            .unwrap();
+    }
 
     table
         .map_alloc(
-            0xFFFF_0000.into(),
-            4,
-            page::PageSize::Kilopage,
-            page::Perm::READ,
+            KERNEL_STACK_BASE.into(),
+            KERNEL_STACK_SIZE / allocator::PAGE_SIZE,
+            PageSize::Kilopage,
+            Perm::READ,
         )
         .unwrap();
-    log::info!("-----");
-    table
-        .map_alloc(
-            0xFFFA_0000.into(),
-            4,
-            page::PageSize::Kilopage,
-            page::Perm::READ,
-        )
-        .unwrap();
-    log::info!("-----");
-    table.free(0xFFFA_0000.into(), 4).unwrap();
-    table.free(0xFFFF_0000.into(), 4).unwrap();
+
+    log::info!("{:#x?}", table.translate(KERNEL_STACK_BASE.into()));
 
     sbi::system::shutdown()
 }
