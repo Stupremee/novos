@@ -8,6 +8,7 @@ use core::ptr::NonNull;
 pub struct Slab {
     free_list: LinkedList,
     // the size of each object inside this slab
+    #[allow(dead_code)]
     size: usize,
 }
 

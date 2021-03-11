@@ -145,7 +145,7 @@ impl super::PageTable for Table {
         }
 
         // if the entry is a leaf, aka already mapped, return an error
-        let mut entry = &mut table.entries[last_idx];
+        let entry = &mut table.entries[last_idx];
         if matches!(entry.kind(), Some(EntryKind::Leaf)) {
             return Err(Error::AlreadyMapped);
         }
@@ -168,7 +168,7 @@ impl super::PageTable for Table {
             table_kib,
             table_mib,
             entry,
-            size,
+            ..
         } = match self.traverse(vaddr) {
             Some(x) => x,
             // there's no mapping the for given address

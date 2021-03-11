@@ -2,6 +2,7 @@
 #![no_std]
 #![no_main]
 #![feature(asm, naked_functions, panic_info_message, exclusive_range_pattern)]
+#![allow(clippy::missing_safety_doc)]
 
 pub mod drivers;
 pub mod page;
