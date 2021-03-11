@@ -130,6 +130,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     )
 }
 
+/// Trampoline to jump enable paging and transition to new stack.
 #[naked]
 unsafe extern "C" fn entry_trampoline(
     _hart_id: usize,
@@ -163,9 +164,11 @@ unsafe extern "C" fn entry_trampoline(
         // Jump into rust code again
     copy_stack_done:
         jr a4
-    ", options(noreturn));
+    ",
+    options(noreturn));
 }
 
+/// Wrapper around the `main` call to avoid marking `main` as `extern "C"`
 unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
     crate::main(hart_id, fdt);
     sbi::system::shutdown()
@@ -180,38 +183,33 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
 #[link_section = ".text.init"]
 unsafe extern "C" fn _boot() -> ! {
     asm!(
-        // ---------------------------------
-        // Load the global pointer into
-        // the `gp` register
-        // ---------------------------------
-        ".option push
-         .option norelax
+        "
+            // Load the global pointer into
+            // the `gp` register
+        .option push
+        .option norelax
             la gp, __global_pointer$
-         .option pop",
-        // ---------------------------------
-        // Disable interrupts
-        // ---------------------------------
-        "   csrw sie, zero
-            csrci sstatus, 2",
-        // ---------------------------------
-        // Set `bss` to zero
-        // ---------------------------------
-        "   la t0, __bss_start
+        .option pop
+
+            // Disable interrupts
+            csrw sie, zero
+            csrci sstatus, 2
+
+            // Zero bss section
+            la t0, __bss_start
             la t1, __bss_end
+
         zero_bss:
             bgeu t0, t1, zero_bss_done
             sd zero, (t0)
             addi t0, t0, 8
             j zero_bss
-        zero_bss_done:",
-        // ---------------------------------
-        // Initialize stack.
-        // ---------------------------------
-        "    la sp, __stack_end",
-        // ---------------------------------
-        // Jump into rust code
-        // ---------------------------------
-        "j _before_main",
+
+        zero_bss_done:
+
+            // Jump into rust code
+            la sp, __stack_end
+            j _before_main",
         options(noreturn)
     )
 }
