@@ -5,6 +5,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 pub mod drivers;
+pub mod hart;
 pub mod page;
 pub mod pmem;
 pub mod unit;
@@ -18,6 +19,6 @@ pub use static_cell::StaticCell;
 use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
-pub fn main(_hart: usize, _fdt: &DeviceTree<'_>) {
+pub fn main(_fdt: &DeviceTree<'_>) {
     log::info!("hey from main");
 }

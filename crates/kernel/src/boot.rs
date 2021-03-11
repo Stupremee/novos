@@ -2,6 +2,7 @@
 
 use crate::drivers::{ns16550a, DeviceTreeDriver};
 use crate::{
+    hart,
     page::{self, PageSize, PageTable, Perm},
     pmem, unit, StaticCell,
 };
@@ -65,6 +66,9 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 
     let new_fdt = slice::from_raw_parts_mut(new_fdt.as_ptr(), size_for_order(fdt_order));
     let fdt: DeviceTree<'static> = fdt.copy_to_slice(new_fdt);
+
+    // initialize hart local storage and hart context
+    hart::init_hart_context(0).unwrap();
 
     // get access to the global page table
     let table = &mut *PAGE_TABLE.get();
@@ -169,8 +173,8 @@ unsafe extern "C" fn entry_trampoline(
 }
 
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`
-unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
-    crate::main(hart_id, fdt);
+unsafe extern "C" fn rust_trampoline(_hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
+    crate::main(fdt);
     sbi::system::shutdown()
 }
 
