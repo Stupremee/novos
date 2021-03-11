@@ -34,6 +34,9 @@ impl<T> Mutex<T> {
     }
 }
 
+unsafe impl<T: Send> Sync for Mutex<T> {}
+unsafe impl<T: Send> Send for Mutex<T> {}
+
 /// The guard providing protected access to the data of a `Mutex`.
 pub struct MutexGuard<'lock, T> {
     lock: &'lock Mutex<T>,

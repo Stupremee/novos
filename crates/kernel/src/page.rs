@@ -116,3 +116,9 @@ pub trait PageTable {
     /// size of the mapped page.
     fn translate(&self, vaddr: VirtAddr) -> Option<(PhysAddr, PageSize)>;
 }
+
+/// Convert a physical address into a virtual address.
+pub fn phys2virt(paddr: impl Into<PhysAddr>) -> VirtAddr {
+    let paddr: usize = paddr.into().into();
+    VirtAddr::from(paddr + crate::boot::KERNEL_PHYS_MEM_BASE)
+}

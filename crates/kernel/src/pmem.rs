@@ -56,12 +56,6 @@ pub unsafe fn init(tree: &DeviceTree<'_>) -> Result<(), Error> {
         .as_slice()
         .iter()
         .try_fold(0usize, |acc, &Range { start, end }| {
-            log::debug!(
-                "Making region {:#X}..{:#X} available for allocation",
-                start,
-                end
-            );
-
             let start = NonNull::new(start as *mut u8).ok_or(Error::NullRegion)?;
             let end = NonNull::new(end as *mut u8).ok_or(Error::NullRegion)?;
             let bytes = alloc.add_region(start, end).map_err(Error::Alloc)?;
