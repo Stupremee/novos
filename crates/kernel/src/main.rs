@@ -1,7 +1,13 @@
 #![deny(rust_2018_idioms, rustdoc::broken_intra_doc_links)]
 #![no_std]
 #![no_main]
-#![feature(asm, naked_functions, panic_info_message, exclusive_range_pattern)]
+#![feature(
+    asm,
+    naked_functions,
+    panic_info_message,
+    exclusive_range_pattern,
+    int_bits_const
+)]
 #![allow(clippy::missing_safety_doc)]
 
 pub mod allocator;

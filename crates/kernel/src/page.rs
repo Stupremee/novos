@@ -6,6 +6,7 @@ pub use types::*;
 
 pub mod sv39;
 
+use crate::boot::KERNEL_PHYS_MEM_BASE;
 use crate::{allocator, pmem};
 use core::ptr::NonNull;
 
@@ -120,5 +121,22 @@ pub trait PageTable {
 /// Convert a physical address into a virtual address.
 pub fn phys2virt(paddr: impl Into<PhysAddr>) -> VirtAddr {
     let paddr: usize = paddr.into().into();
-    VirtAddr::from(paddr + crate::boot::KERNEL_PHYS_MEM_BASE)
+
+    // FIXME: This is currently safe, since this is the only access to satp.
+    // However in the future there must be some global lock to provide
+    // safe access the the global page_table.
+    let mode = riscv::csr::satp::read().mode;
+
+    // if paging is not enabled, return the physical address.
+    if matches!(mode, riscv::csr::satp::Mode::Bare) {
+        return paddr.into();
+    }
+
+    // if the "paddr" is already a virtual address, return it instantly without
+    // converting
+    if paddr & (1 << (usize::BITS as usize - KERNEL_PHYS_MEM_BASE.leading_zeros() as usize)) != 0 {
+        return paddr.into();
+    }
+
+    VirtAddr::from(paddr + KERNEL_PHYS_MEM_BASE)
 }

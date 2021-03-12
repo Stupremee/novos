@@ -126,14 +126,21 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
         )
         .unwrap();
 
+    // map the whole MMIO space (<0x8000_0000)
+    for addr in (0..0x8000_0000).step_by(unit::GIB) {
+        table
+            .map(
+                addr.into(),
+                addr.into(),
+                PageSize::Gigapage,
+                Perm::READ | Perm::WRITE,
+            )
+            .unwrap();
+    }
+
     // construct the raw value for the satp register we give to the trampoline
     let satp = table as *const _ as usize;
     let satp = (8 << 60) | (satp >> 12);
-
-    log::info!(
-        "{:#x?}",
-        table.translate((KERNEL_STACK_BASE + KERNEL_STACK_SIZE - 8).into())
-    );
 
     // prepare some addresses that are used inside the trampoline
     entry_trampoline(
@@ -184,40 +191,9 @@ unsafe extern "C" fn entry_trampoline(
 }
 
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`
-unsafe extern "C" fn rust_trampoline(_hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
-    // bring up the other harts before jumping to the main
-    // this is done here so we already have paging enabled
-    let page = pmem::alloc().unwrap();
-    let args = &mut *page::phys2virt(page.as_ptr())
-        .as_ptr::<[MaybeUninit<HartArgs>; HART_COUNT as usize]>();
-
-    // check if there's enough space to fit all hart arguments
-    assert!(HART_COUNT as usize * core::mem::size_of::<HartArgs>() <= PAGE_SIZE);
-
-    // try to boot every hart
-    let mut id = 1;
-
-    for (sbi_id, args_ptr) in (1..HART_COUNT).zip(args.iter_mut()) {
-        let args = HartArgs {
-            id,
-            stack: page::phys2virt(pmem::alloc().unwrap().as_ptr()).as_ptr(),
-        };
-        args_ptr.as_mut_ptr().write(args);
-
-        match sbi::hsm::start(
-            sbi_id as usize,
-            hart_entry as usize,
-            args_ptr.as_ptr() as usize,
-        ) {
-            Ok(_) => id += 1,
-            // the hart is non-existant
-            Err(sbi::Error::InvalidParam) | Err(sbi::Error::AlreadyAvailable) => {}
-            Err(err) => {} // log::warn!("{} to start hart {}: {:?}", "Failed".yellow(), sbi_id, err),
-        };
-    }
-
+unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
     crate::main(fdt);
-    sbi::system::shutdown()
+    loop {}
 }
 
 #[naked]
@@ -231,7 +207,7 @@ unsafe extern "C" fn hart_entry(args: &'static HartArgs) -> ! {
 
 #[no_mangle]
 unsafe extern "C" fn rust_hart_entry(args: &'static HartArgs) -> ! {
-    //log::debug!("hello from hart {}", args.id);
+    log::debug!("hello from hart {}", args.id);
     loop {}
 }
 

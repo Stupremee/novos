@@ -93,7 +93,7 @@ impl super::PageTable for Table {
         size: PageSize,
         perm: Perm,
     ) -> Result<(), Error> {
-        // check if thej
+        // check if the virtual address is below the maximum
         assert!(
             usize::from(vaddr) <= 0x7F_FFFF_FFFF,
             "virtual address exceeded 39 bits"

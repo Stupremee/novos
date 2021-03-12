@@ -1,3 +1,4 @@
+use crate::page;
 use core::{marker::PhantomData, ptr::NonNull};
 
 /// Intrusive linked list.
@@ -28,8 +29,9 @@ impl LinkedList {
     ///
     /// `item` pointer must be valid for writes and must not outlive this list.
     pub unsafe fn push(&mut self, item: NonNull<usize>) {
+        let item = page::phys2virt(item.as_ptr());
         *item.as_ptr() = self.head.map(|ptr| ptr.as_ptr() as usize).unwrap_or(0);
-        self.head = Some(item);
+        self.head = Some(NonNull::new(item.as_ptr()).unwrap());
     }
 
     /// Pop one element from the head of this list.
@@ -37,8 +39,9 @@ impl LinkedList {
         if let Some(head) = self.head {
             // SAFETY
             // `head` is not null, and the other guarantees must be guaranteed by `push`.
-            self.head = NonNull::new(unsafe { *head.as_ptr() as *mut usize });
-            Some(head)
+            let head = page::phys2virt(head.as_ptr());
+            self.head = NonNull::new(unsafe { *head.as_ptr::<usize>() as *mut usize });
+            Some(NonNull::new(head.as_ptr()).unwrap())
         } else {
             None
         }
