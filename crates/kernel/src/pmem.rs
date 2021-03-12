@@ -3,11 +3,12 @@
 use core::ptr::NonNull;
 use core::{array, mem, slice};
 
-use crate::unit;
-use allocator::{
+use crate::allocator::{
+    self,
     rangeset::{self, Range},
     BuddyAllocator, RangeSet,
 };
+use crate::unit;
 use devicetree::DeviceTree;
 use riscv::sync::Mutex;
 

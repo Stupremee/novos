@@ -1,6 +1,6 @@
 //! Hart local storage and context.
 
-use crate::pmem;
+use crate::{allocator, pmem};
 use core::cell::Cell;
 
 /// This structure is replicated on every hart and stores

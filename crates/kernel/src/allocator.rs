@@ -1,10 +1,4 @@
 //! Implementation of all different allocators that are used inside the kernel.
-//!
-//! Put into a separate crate to make testing easier.
-
-#![deny(rust_2018_idioms, rustdoc::broken_intra_doc_links)]
-#![feature(slice_ptr_get)]
-#![no_std]
 
 pub mod buddy;
 pub use buddy::{order_for_size, size_for_order, BuddyAllocator};

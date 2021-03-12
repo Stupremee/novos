@@ -1,5 +1,4 @@
-use super::{align_up, Error, Result};
-use crate::LinkedList;
+use super::{align_up, Error, LinkedList, Result};
 use core::{cmp, ptr::NonNull};
 
 /// The maximum order for the buddy allocator (inclusive).

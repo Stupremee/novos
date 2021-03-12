@@ -1,12 +1,12 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
+use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
 use crate::drivers::{ns16550a, DeviceTreeDriver};
 use crate::{
     hart,
     page::{self, PageSize, PageTable, Perm},
     pmem, unit, StaticCell,
 };
-use allocator::{order_for_size, size_for_order};
 use core::mem::MaybeUninit;
 use core::slice;
 use devicetree::DeviceTree;
@@ -101,7 +101,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 
     // map the kernel sections
     let mut map_section = |(start, end): (*mut u8, *mut u8), perm: Perm| {
-        for page in (start as usize..end as usize).step_by(allocator::PAGE_SIZE) {
+        for page in (start as usize..end as usize).step_by(PAGE_SIZE) {
             table
                 .map(page.into(), page.into(), PageSize::Kilopage, perm)
                 .unwrap();
@@ -120,7 +120,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     table
         .map_alloc(
             KERNEL_STACK_BASE.into(),
-            KERNEL_STACK_SIZE / allocator::PAGE_SIZE,
+            KERNEL_STACK_SIZE / PAGE_SIZE,
             PageSize::Kilopage,
             Perm::READ | Perm::WRITE,
         )
@@ -192,7 +192,7 @@ unsafe extern "C" fn rust_trampoline(_hart_id: usize, fdt: &DeviceTree<'_>) -> !
         .as_ptr::<[MaybeUninit<HartArgs>; HART_COUNT as usize]>();
 
     // check if there's enough space to fit all hart arguments
-    assert!(HART_COUNT as usize * core::mem::size_of::<HartArgs>() <= allocator::PAGE_SIZE);
+    assert!(HART_COUNT as usize * core::mem::size_of::<HartArgs>() <= PAGE_SIZE);
 
     // try to boot every hart
     let mut id = 1;

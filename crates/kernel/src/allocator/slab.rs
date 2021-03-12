@@ -1,4 +1,4 @@
-use crate::LinkedList;
+use super::LinkedList;
 use core::ptr::NonNull;
 
 /// A slab holds a bunch of objects with a fixed size.

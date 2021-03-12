@@ -6,7 +6,7 @@ pub use types::*;
 
 pub mod sv39;
 
-use crate::pmem;
+use crate::{allocator, pmem};
 use core::ptr::NonNull;
 
 displaydoc_lite::displaydoc! {

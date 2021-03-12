@@ -6,7 +6,6 @@ edition = "2018"
 
 [dependencies]
 devicetree = { path = "../devicetree" }
-allocator = { path = "../allocator" }
 riscv = { path = "../riscv" }
 log = { path = "../log" }
 sbi = { path = "../sbi" }
