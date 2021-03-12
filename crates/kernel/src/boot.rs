@@ -7,6 +7,7 @@ use crate::{
     pmem, unit, StaticCell,
 };
 use allocator::{order_for_size, size_for_order};
+use core::mem::MaybeUninit;
 use core::slice;
 use devicetree::DeviceTree;
 use riscv::symbols;
@@ -23,6 +24,16 @@ pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
 /// this constant to any "real" physaddr returns the new physaddr which can be used if
 /// paging is activaed.
 pub const KERNEL_PHYS_MEM_BASE: usize = 0x001F_FF00_0000;
+
+/// The maximum number of harts that will try to be started.
+pub const HART_COUNT: u64 = 4;
+
+/// Structure that is used to pass data to the harts that are started
+/// from the boot hart.
+struct HartArgs {
+    id: u64,
+    stack: *const u8,
+}
 
 /// The code that sets up memory stuff,
 /// allocates a new stack and then runs the real main function.
@@ -174,8 +185,54 @@ unsafe extern "C" fn entry_trampoline(
 
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`
 unsafe extern "C" fn rust_trampoline(_hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
+    // bring up the other harts before jumping to the main
+    // this is done here so we already have paging enabled
+    let page = pmem::alloc().unwrap();
+    let args = &mut *page::phys2virt(page.as_ptr())
+        .as_ptr::<[MaybeUninit<HartArgs>; HART_COUNT as usize]>();
+
+    // check if there's enough space to fit all hart arguments
+    assert!(HART_COUNT as usize * core::mem::size_of::<HartArgs>() <= allocator::PAGE_SIZE);
+
+    // try to boot every hart
+    let mut id = 1;
+
+    for (sbi_id, args_ptr) in (1..HART_COUNT).zip(args.iter_mut()) {
+        let args = HartArgs {
+            id,
+            stack: page::phys2virt(pmem::alloc().unwrap().as_ptr()).as_ptr(),
+        };
+        args_ptr.as_mut_ptr().write(args);
+
+        match sbi::hsm::start(
+            sbi_id as usize,
+            hart_entry as usize,
+            args_ptr.as_ptr() as usize,
+        ) {
+            Ok(_) => id += 1,
+            // the hart is non-existant
+            Err(sbi::Error::InvalidParam) | Err(sbi::Error::AlreadyAvailable) => {}
+            Err(err) => {} // log::warn!("{} to start hart {}: {:?}", "Failed".yellow(), sbi_id, err),
+        };
+    }
+
     crate::main(fdt);
     sbi::system::shutdown()
+}
+
+#[naked]
+unsafe extern "C" fn hart_entry(args: &'static HartArgs) -> ! {
+    asm!("
+    2: j 2b
+        ld sp, 8(a1)
+        j {}
+    ", sym rust_hart_entry, options(noreturn))
+}
+
+#[no_mangle]
+unsafe extern "C" fn rust_hart_entry(args: &'static HartArgs) -> ! {
+    //log::debug!("hello from hart {}", args.id);
+    loop {}
 }
 
 /// The entrypoint for the whole kernel.
