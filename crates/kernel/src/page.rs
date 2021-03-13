@@ -8,7 +8,9 @@ pub mod sv39;
 
 use crate::boot::KERNEL_PHYS_MEM_BASE;
 use crate::{allocator, pmem};
+use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
+use riscv::sync::{Mutex, MutexGuard};
 
 displaydoc_lite::displaydoc! {
     /// Errors that are related to paging.
@@ -139,4 +141,42 @@ pub fn phys2virt(paddr: impl Into<PhysAddr>) -> VirtAddr {
     }
 
     VirtAddr::from(paddr + KERNEL_PHYS_MEM_BASE)
+}
+
+// A dummy mutex that ensures exclusive access to the page table
+// stored in `satp`.
+static ROOT_TABLE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Check if paging is enabled.
+pub fn enabled() -> bool {
+    !matches!(riscv::csr::satp::read().mode, riscv::csr::satp::Mode::Bare)
+}
+
+/// Get exclusive access to the global page table.
+pub fn root() -> TableGuard {
+    let table = riscv::csr::satp::read().root_table;
+    TableGuard {
+        table: unsafe { &mut *(table as *mut _) },
+        _guard: ROOT_TABLE_LOCK.lock(),
+    }
+}
+
+/// Structure that protects access to the global page table.
+pub struct TableGuard {
+    table: &'static mut sv39::Table,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Deref for TableGuard {
+    type Target = sv39::Table;
+
+    fn deref(&self) -> &Self::Target {
+        self.table
+    }
+}
+
+impl DerefMut for TableGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.table
+    }
 }

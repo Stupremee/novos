@@ -38,7 +38,7 @@ pub fn read() -> Satp {
 }
 
 /// Write to the `satp` CSR.
-pub fn write(satp: Satp) {
+pub unsafe fn write(satp: Satp) {
     let bits = (satp.root_table >> 12) | ((satp.asid as u64) << 44);
 
     let mode = match satp.mode {
@@ -48,5 +48,5 @@ pub fn write(satp: Satp) {
     };
 
     let bits = bits | (mode << 60);
-    unsafe { _write(bits as usize) }
+    _write(bits as usize)
 }
