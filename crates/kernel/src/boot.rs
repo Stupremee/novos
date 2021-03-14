@@ -29,6 +29,7 @@ pub const HART_COUNT: u64 = 4;
 
 /// Structure that is used to pass data to the harts that are started
 /// from the boot hart.
+#[repr(C)]
 struct HartArgs {
     id: u64,
     stack: *const u8,
@@ -213,6 +214,11 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp:
 
     // get a new stack for the hart that will be spawned
     let (phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, 1);
+    log::debug!(
+        "{:x?} - {:x?}",
+        usize::from(phys_stack),
+        usize::from(virt_stack)
+    );
 
     // construct the arguments that the new hart will receive
     let args = HartArgs {
@@ -241,22 +247,22 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
     asm!("
         ld sp, -8(a1)
         ld t0, -16(a1)
-        addi sp, sp, -{args_size}
+        li t1, 24
+        sub sp, sp, t1
         mv a0, sp
 
         csrw satp, t0
         j {entry}
     ",
         entry = sym rust_hart_entry,
-        args_size = const mem::size_of::<HartArgs>(),
         options(noreturn)
     )
 }
 
 #[no_mangle]
 unsafe extern "C" fn rust_hart_entry(args: &'static HartArgs) -> ! {
-    hart::init_hart_context(args.id).unwrap();
-    log::debug!("hello from hart {}", hart::current().id());
+    //hart::init_hart_context(args.id).unwrap();
+    //log::debug!("hello from hart {}", args.id);
     loop {}
 }
 

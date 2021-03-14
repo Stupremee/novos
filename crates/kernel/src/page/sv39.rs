@@ -1,6 +1,6 @@
 //! Implementation of the Sv39 virtual memory mode.
 
-use super::{Error, PageSize, Perm, PhysAddr, VirtAddr};
+use super::{phys2virt, Error, PageSize, Perm, PhysAddr, VirtAddr};
 use crate::pmem;
 use core::ptr::NonNull;
 
@@ -40,12 +40,13 @@ impl Table {
                 EntryKind::Leaf => break PhysAddr::from(entry as *const _),
                 EntryKind::Branch(new_table) => {
                     // this entry points to the next level, so traverse the next level
+                    let new_table = phys2virt(new_table.as_ptr::<u8>());
                     table = unsafe { new_table.as_ptr::<Table>().as_mut().unwrap() };
 
                     // update the level 1 and 2 table variable to return them later
                     match idx {
-                        1 => table_kib = Some(new_table),
-                        2 => table_mib = Some(new_table),
+                        1 => table_kib = Some(NonNull::new(new_table.as_ptr()).unwrap()),
+                        2 => table_mib = Some(NonNull::new(new_table.as_ptr()).unwrap()),
                         _ => {}
                     }
                 }
@@ -63,7 +64,7 @@ impl Table {
         Some(Mapping {
             table_mib,
             table_kib,
-            entry,
+            entry: entry.as_ptr(),
             size: match idx {
                 0 => PageSize::Kilopage,
                 1 => PageSize::Megapage,
@@ -127,19 +128,20 @@ impl super::PageTable for Table {
                 Some(EntryKind::Leaf) => return Err(Error::AlreadyMapped),
                 Some(EntryKind::Branch(new_table)) => {
                     // this entry points to the next level, so traverse the next level
+                    let new_table = phys2virt(new_table);
                     table = unsafe { new_table.as_ptr::<Table>().as_mut().unwrap() };
                 }
                 None => {
                     // the entry is empty, so we allocate a new table and turn this entry
                     // into a branch to the new table
-                    let page_ptr = pmem::zalloc().map_err(Error::Alloc)?;
-                    let page = page_ptr.as_ptr() as u64;
+                    let page_ptr = phys2virt(pmem::zalloc().map_err(Error::Alloc)?.as_ptr());
+                    let page = usize::from(page_ptr) as u64;
 
                     // update the current entry to point to the new page
                     entry.set((page >> 2) | Entry::VALID);
 
                     // traverse the newly allocated table
-                    table = unsafe { page_ptr.as_ptr().cast::<Table>().as_mut().unwrap() };
+                    table = unsafe { page_ptr.as_ptr::<Table>().as_mut().unwrap() };
                 }
             }
         }
@@ -176,12 +178,12 @@ impl super::PageTable for Table {
         };
 
         // conert addresses to references
-        let table_kib = table_kib.map(|table| unsafe { &mut *table.as_ptr::<Table>() });
-        let mut table_mib = table_mib.map(|table| unsafe { &mut *table.as_ptr::<Table>() });
+        let table_kib = table_kib.map(|table| unsafe { &mut *table.as_ptr() });
+        let mut table_mib = table_mib.map(|table| unsafe { &mut *table.as_ptr() });
 
         // clear the entry by zeroing it
         unsafe {
-            core::ptr::write_volatile(entry.as_ptr::<Entry>(), Entry::EMPTY);
+            core::ptr::write_volatile(entry, Entry::EMPTY);
         }
 
         // if we have a level 2 table, check if we can free the table
@@ -215,7 +217,7 @@ impl super::PageTable for Table {
     fn translate(&self, vaddr: VirtAddr) -> Option<(PhysAddr, PageSize)> {
         self.traverse(vaddr).map(|Mapping { entry, size, .. }| {
             // read the PTE from the found address
-            let entry = unsafe { entry.as_ptr::<Entry>().as_ref().unwrap() };
+            let entry = unsafe { entry.as_ref().unwrap() };
 
             // get the page offset from the virtual address
             let off = usize::from(vaddr);
@@ -238,10 +240,10 @@ impl super::PageTable for Table {
 /// The tables are used inside unmap to free them if neccessary.
 #[derive(Debug)]
 struct Mapping {
-    table_mib: Option<PhysAddr>,
-    table_kib: Option<PhysAddr>,
+    table_mib: Option<NonNull<Table>>,
+    table_kib: Option<NonNull<Table>>,
 
-    entry: PhysAddr,
+    entry: *mut Entry,
     size: PageSize,
 }
 
