@@ -239,15 +239,17 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp:
     .unwrap();
 
     crate::main(fdt);
-    sbi::system::shutdown()
+    loop {}
+    //sbi::system::shutdown()
 }
 
 #[naked]
 unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
     asm!("
-        ld sp, -8(a1)
-        ld t0, -16(a1)
+        ld sp, -16(a1)
+        ld t0, -24(a1)
         li t1, 24
+        mv sp, a1
         sub sp, sp, t1
         mv a0, sp
 
@@ -261,8 +263,10 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
 
 #[no_mangle]
 unsafe extern "C" fn rust_hart_entry(args: &'static HartArgs) -> ! {
-    //hart::init_hart_context(args.id).unwrap();
-    //log::debug!("hello from hart {}", args.id);
+    // initialize the context of the current hart
+    hart::init_hart_context(args.id).unwrap();
+
+    log::debug!("hello from hart {:p}", args.);
     loop {}
 }
 

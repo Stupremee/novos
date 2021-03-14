@@ -63,7 +63,7 @@ pub fn run(cfg: Config) -> Result<()> {
     let cpus = cfg.cpus.to_string();
     let ram = cfg.ram;
     let debug = if cfg.debug {
-        &["-d", "guest_errors,trace:riscv_trap,int"]
+        &["-d", "guest_errors,trace:riscv_trap"]
     } else {
         &[][..]
     };
