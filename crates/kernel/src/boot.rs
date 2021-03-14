@@ -25,7 +25,7 @@ pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
 pub const KERNEL_PHYS_MEM_BASE: usize = 0x001F_FF00_0000;
 
 /// The maximum number of harts that will try to be started.
-pub const HART_COUNT: u64 = 4;
+pub const HART_COUNT: usize = 4;
 
 /// Structure that is used to pass data to the harts that are started
 /// from the boot hart.
@@ -60,6 +60,12 @@ fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (PhysAddr, Virt
     let paddr: usize = table.translate(start.into()).unwrap().0.into();
 
     (PhysAddr::from(paddr + KERNEL_STACK_SIZE), vaddr.into())
+}
+
+/// Free a kernel stack that was previously allocated using
+/// the method above.
+unsafe fn free_kernel_stack(table: &mut page::sv39::Table, vaddr: VirtAddr) {
+    table.free(vaddr, KERNEL_STACK_SIZE / PAGE_SIZE).unwrap();
 }
 
 /// The code that sets up memory stuff,
@@ -212,37 +218,54 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp:
     // the stack for every hart
     let mut table = page::root();
 
-    // get a new stack for the hart that will be spawned
-    let (phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, 1);
-    log::debug!(
-        "{:x?} - {:x?}",
-        usize::from(phys_stack),
-        usize::from(virt_stack)
-    );
+    // we use our own hart ids instead of the ones from OpenSBI
+    let mut id = 1;
 
-    // construct the arguments that the new hart will receive
-    let args = HartArgs {
-        id: 1337,
-        stack: virt_stack.as_ptr(),
-        satp,
-    };
+    // loop through a fixed number of hart ids and try to start them.
+    for sbi_id in 0..HART_COUNT {
+        // we don't want to boot ourself
+        if sbi_id == hart_id {
+            continue;
+        }
 
-    // write them to the top of the new stack
-    let args_ptr = usize::from(phys_stack) - mem::size_of::<HartArgs>();
-    page::phys2virt(args_ptr).as_ptr::<HartArgs>().write(args);
+        log::debug!("{} hart {}...", "Starting".magenta(), sbi_id);
 
-    sbi::hsm::start(
-        hart_id.wrapping_sub(1).min(3),
-        hart_entry as usize,
-        phys_stack.into(),
-    )
-    .unwrap();
+        // get a new stack for the hart
+        let (phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, id as u64);
+
+        // construct the arguments and store them onto the new stack
+        let args = HartArgs {
+            id,
+            stack: virt_stack.as_ptr(),
+            satp,
+        };
+        let args_ptr = usize::from(phys_stack) - mem::size_of::<HartArgs>();
+        page::phys2virt(args_ptr).as_ptr::<HartArgs>().write(args);
+
+        // try to start the hart
+        match sbi::hsm::start(sbi_id, hart_entry as usize, phys_stack.into()) {
+            // hart successfully started
+            Ok(()) => id += 1,
+            // OpenSBIs hart ids are in order so after one invalid id,
+            // we can abort
+            Err(sbi::Error::InvalidParam) => {
+                // free the stack
+                free_kernel_stack(&mut *table, virt_stack);
+
+                break;
+            }
+            // `sbi_id` is the booting hart
+            Err(sbi::Error::AlreadyAvailable) => {}
+            Err(err) => log::warn!("{} to start hart {}: {:?}", "Failed".yellow(), sbi_id, err),
+        }
+    }
 
     crate::main(fdt);
     loop {}
     //sbi::system::shutdown()
 }
 
+/// Raw entrypoint for new harts that are started by the booting hart.
 #[naked]
 unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
     asm!("
@@ -261,12 +284,19 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
     )
 }
 
+/// The rust version of the entry for every hart, to avoid marking
+/// the hart main function as `extern "C"`.
 #[no_mangle]
 unsafe extern "C" fn rust_hart_entry(args: &'static HartArgs) -> ! {
     // initialize the context of the current hart
     hart::init_hart_context(args.id).unwrap();
+    log::info!(
+        "{} with id {} online.",
+        "Hart".green(),
+        hart::current().id()
+    );
 
-    log::debug!("hello from hart {:p}", args.);
+    crate::hmain();
     loop {}
 }
 

@@ -134,14 +134,14 @@ impl super::PageTable for Table {
                 None => {
                     // the entry is empty, so we allocate a new table and turn this entry
                     // into a branch to the new table
-                    let page_ptr = phys2virt(pmem::zalloc().map_err(Error::Alloc)?.as_ptr());
-                    let page = usize::from(page_ptr) as u64;
+                    let page_ptr = pmem::zalloc().map_err(Error::Alloc)?.as_ptr();
+                    let page = page_ptr as u64;
 
                     // update the current entry to point to the new page
                     entry.set((page >> 2) | Entry::VALID);
 
                     // traverse the newly allocated table
-                    table = unsafe { page_ptr.as_ptr::<Table>().as_mut().unwrap() };
+                    table = unsafe { phys2virt(page_ptr).as_ptr::<Table>().as_mut().unwrap() };
                 }
             }
         }

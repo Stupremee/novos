@@ -68,6 +68,8 @@ pub trait PageTable {
 
             // map the new page
             self.map(paddr, vaddr.into(), page_size, perm)?;
+
+            riscv::asm::sfence(usize::from(vaddr), None);
         }
 
         Ok(())
@@ -100,6 +102,8 @@ pub trait PageTable {
 
             // unmap the page
             assert!(self.unmap(page.into())?);
+
+            riscv::asm::sfence(usize::from(vaddr), None);
 
             // deallocate the page
             pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order)

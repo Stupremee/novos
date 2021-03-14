@@ -8,7 +8,7 @@ use crate::allocator::{
     rangeset::{self, Range},
     BuddyAllocator, RangeSet,
 };
-use crate::unit;
+use crate::{page, unit};
 use devicetree::DeviceTree;
 use riscv::sync::Mutex;
 
@@ -115,10 +115,11 @@ pub fn zalloc() -> Result<NonNull<u8>, allocator::Error> {
 #[inline]
 pub fn zalloc_order(order: usize) -> Result<NonNull<u8>, allocator::Error> {
     let page = alloc_order(order)?;
+    let page_ptr = page::phys2virt(page.as_ptr());
 
     let slice = unsafe {
         slice::from_raw_parts_mut(
-            page.as_ptr().cast::<u64>(),
+            page_ptr.as_ptr::<u64>(),
             allocator::size_for_order(order) / mem::size_of::<u64>(),
         )
     };

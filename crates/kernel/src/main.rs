@@ -29,3 +29,6 @@ use devicetree::DeviceTree;
 pub fn main(_fdt: &DeviceTree<'_>) {
     log::info!("hey from main");
 }
+
+/// The entry point for each new hart that is not the boot hart.
+pub fn hmain() {}
