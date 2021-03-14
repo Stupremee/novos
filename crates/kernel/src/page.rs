@@ -134,12 +134,6 @@ pub fn phys2virt(paddr: impl Into<PhysAddr>) -> VirtAddr {
         return paddr.into();
     }
 
-    // if the "paddr" is already a virtual address, return it instantly without
-    // converting
-    if paddr & (1 << (usize::BITS as usize - KERNEL_PHYS_MEM_BASE.leading_zeros() as usize)) != 0 {
-        return paddr.into();
-    }
-
     VirtAddr::from(paddr + KERNEL_PHYS_MEM_BASE)
 }
 

@@ -29,9 +29,9 @@ impl LinkedList {
     ///
     /// `item` pointer must be valid for writes and must not outlive this list.
     pub unsafe fn push(&mut self, item: NonNull<usize>) {
-        let item = page::phys2virt(item.as_ptr());
-        *item.as_ptr() = self.head.map(|ptr| ptr.as_ptr() as usize).unwrap_or(0);
-        self.head = Some(NonNull::new(item.as_ptr()).unwrap());
+        let item_ptr = page::phys2virt(item.as_ptr());
+        *item_ptr.as_ptr() = self.head.map(|ptr| ptr.as_ptr() as usize).unwrap_or(0);
+        self.head = Some(item);
     }
 
     /// Pop one element from the head of this list.
@@ -39,9 +39,9 @@ impl LinkedList {
         if let Some(head) = self.head {
             // SAFETY
             // `head` is not null, and the other guarantees must be guaranteed by `push`.
-            let head = page::phys2virt(head.as_ptr());
-            self.head = NonNull::new(unsafe { *head.as_ptr::<usize>() as *mut usize });
-            Some(NonNull::new(head.as_ptr()).unwrap())
+            let head_ptr = page::phys2virt(head.as_ptr());
+            self.head = NonNull::new(unsafe { *head_ptr.as_ptr::<usize>() as *mut _ });
+            Some(head)
         } else {
             None
         }
@@ -81,9 +81,12 @@ impl ListNode<'_> {
     pub fn pop(&self) -> Option<NonNull<usize>> {
         // if there's a node after this one, link `prev` and `head.next`
         if let Some((prev, head)) = self.prev.zip(self.head) {
+            let head = page::phys2virt(head.as_ptr());
+            let prev = page::phys2virt(prev.as_ptr());
+
             // SAFETY
             // We checked if both pointers are non-null.
-            unsafe { *prev.as_ptr() = *head.as_ptr() }
+            unsafe { *prev.as_ptr::<usize>() = *head.as_ptr::<usize>() }
         }
 
         self.head
@@ -108,6 +111,7 @@ impl<'list> Iterator for IterMut<'list> {
     fn next(&mut self) -> Option<Self::Item> {
         // check if we reached the end
         let head = self.head?.as_ptr();
+        let head_ptr = page::phys2virt(head);
 
         // create the list node
         let node = ListNode {
@@ -118,7 +122,7 @@ impl<'list> Iterator for IterMut<'list> {
 
         // move one element forward
         self.head = self.prev;
-        self.head = NonNull::new(unsafe { *head as *mut _ });
+        self.head = NonNull::new(unsafe { *head_ptr.as_ptr::<usize>() as *mut _ });
 
         // return the new node
         Some(node)

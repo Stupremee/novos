@@ -4,13 +4,12 @@ use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
 use crate::drivers::{ns16550a, DeviceTreeDriver};
 use crate::{
     hart,
-    page::{self, PageSize, PageTable, Perm},
+    page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
     pmem, unit, StaticCell,
 };
-use core::mem::MaybeUninit;
-use core::slice;
+use core::{mem, slice};
 use devicetree::DeviceTree;
-use riscv::symbols;
+use riscv::{csr::satp, symbols};
 
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
@@ -33,6 +32,33 @@ pub const HART_COUNT: u64 = 4;
 struct HartArgs {
     id: u64,
     stack: *const u8,
+    satp: usize,
+}
+
+/// Allocates the stack for a hart, with the given id and returns the end address
+/// of the new stack.
+///
+/// Returns both, the physical and virtual address to the end of the stack.
+fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (PhysAddr, VirtAddr) {
+    // calculate the start address for hart `id`s stack
+    let start = KERNEL_STACK_BASE + (id as usize * KERNEL_STACK_SIZE);
+
+    // TODO: map guard pages around the stack
+    // allocate the new stack
+    table
+        .map_alloc(
+            start.into(),
+            KERNEL_STACK_SIZE / PAGE_SIZE,
+            PageSize::Kilopage,
+            Perm::READ | Perm::WRITE,
+        )
+        .unwrap();
+
+    // get the physical and virtual address
+    let vaddr = start + KERNEL_STACK_SIZE;
+    let paddr: usize = table.translate(start.into()).unwrap().0.into();
+
+    (PhysAddr::from(paddr + KERNEL_STACK_SIZE), vaddr.into())
 }
 
 /// The code that sets up memory stuff,
@@ -116,15 +142,8 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     map_section(symbols::bss_range(), Perm::READ | Perm::WRITE);
     map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
 
-    // map the stack that we will use for this hart at the global stack base
-    table
-        .map_alloc(
-            KERNEL_STACK_BASE.into(),
-            KERNEL_STACK_SIZE / PAGE_SIZE,
-            PageSize::Kilopage,
-            Perm::READ | Perm::WRITE,
-        )
-        .unwrap();
+    // allocate the stack for this hart
+    let (_, stack) = alloc_kernel_stack(table, 0);
 
     // map the whole MMIO space (<0x8000_0000)
     for addr in (0..0x8000_0000).step_by(unit::GIB) {
@@ -138,18 +157,16 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
             .unwrap();
     }
 
-    // construct the raw value for the satp register we give to the trampoline
-    let satp = table as *const _ as usize;
-    let satp = (8 << 60) | (satp >> 12);
+    // enable paging
+    satp::write(satp::Satp {
+        asid: 0,
+        mode: satp::Mode::Sv39,
+        root_table: table as *const _ as u64,
+    });
+    riscv::asm::sfence(None, None);
 
-    // prepare some addresses that are used inside the trampoline
-    entry_trampoline(
-        hart_id,
-        &fdt,
-        satp,
-        KERNEL_STACK_BASE + KERNEL_STACK_SIZE - 8,
-        rust_trampoline as usize,
-    )
+    // jump to rust code using the trampoline
+    entry_trampoline(hart_id, &fdt, stack.into(), rust_trampoline as usize)
 }
 
 /// Trampoline to jump enable paging and transition to new stack.
@@ -157,18 +174,14 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 unsafe extern "C" fn entry_trampoline(
     _hart_id: usize,
     _fdt: *const DeviceTree<'_>,
-    _satp: usize,
     _new_stack: usize,
     _dst: usize,
 ) -> ! {
     #[rustfmt::skip]
     asm!("
-        // Enable paging
-        csrw satp, a2
-
         mv t0, sp
-        mv sp, a3
-        mv t1, a3
+        mv sp, a2
+        mv t1, a2
         la t2, __stack_end
 
     copy_stack:
@@ -185,29 +198,65 @@ unsafe extern "C" fn entry_trampoline(
 
         // Jump into rust code again
     copy_stack_done:
-        jr a4
+        jr a3
     ",
     options(noreturn));
 }
 
-/// Wrapper around the `main` call to avoid marking `main` as `extern "C"`
-unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
+/// Wrapper around the `main` call to avoid marking `main` as `extern "C"`.
+///
+/// This function also brings up the other harts.
+unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp: usize) -> ! {
+    // get access to the global page table, because we need it to map
+    // the stack for every hart
+    let mut table = page::root();
+
+    // get a new stack for the hart that will be spawned
+    let (phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, 1);
+
+    // construct the arguments that the new hart will receive
+    let args = HartArgs {
+        id: 1337,
+        stack: virt_stack.as_ptr(),
+        satp,
+    };
+
+    // write them to the top of the new stack
+    let args_ptr = usize::from(phys_stack) - mem::size_of::<HartArgs>();
+    page::phys2virt(args_ptr).as_ptr::<HartArgs>().write(args);
+
+    sbi::hsm::start(
+        hart_id.wrapping_sub(1).min(3),
+        hart_entry as usize,
+        phys_stack.into(),
+    )
+    .unwrap();
+
     crate::main(fdt);
-    loop {}
+    sbi::system::shutdown()
 }
 
 #[naked]
-unsafe extern "C" fn hart_entry(args: &'static HartArgs) -> ! {
+unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
     asm!("
-    2: j 2b
-        ld sp, 8(a1)
-        j {}
-    ", sym rust_hart_entry, options(noreturn))
+        ld sp, -8(a1)
+        ld t0, -16(a1)
+        addi sp, sp, -{args_size}
+        mv a0, sp
+
+        csrw satp, t0
+        j {entry}
+    ",
+        entry = sym rust_hart_entry,
+        args_size = const mem::size_of::<HartArgs>(),
+        options(noreturn)
+    )
 }
 
 #[no_mangle]
 unsafe extern "C" fn rust_hart_entry(args: &'static HartArgs) -> ! {
-    log::debug!("hello from hart {}", args.id);
+    hart::init_hart_context(args.id).unwrap();
+    log::debug!("hello from hart {}", hart::current().id());
     loop {}
 }
 
