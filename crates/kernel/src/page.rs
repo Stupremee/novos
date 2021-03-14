@@ -69,7 +69,7 @@ pub trait PageTable {
             // map the new page
             self.map(paddr, vaddr.into(), page_size, perm)?;
 
-            riscv::asm::sfence(usize::from(vaddr), None);
+            riscv::asm::sfence(vaddr, None);
         }
 
         Ok(())

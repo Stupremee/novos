@@ -8,7 +8,7 @@
     exclusive_range_pattern,
     int_bits_const
 )]
-#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::missing_safety_doc, clippy::empty_loop)]
 
 pub mod allocator;
 pub mod drivers;
