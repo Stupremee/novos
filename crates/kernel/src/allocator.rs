@@ -41,6 +41,8 @@ displaydoc! {
         NoMemoryAvailable,
         /// tried to allocate zero pages using `alloc_pages`
         AllocateZeroPages,
+        /// this is not a real error and should never be thrown somewhere
+        NoSlabForLayout,
         /// Tried to create a `NonNull` from a null pointer.
         ///
         /// Mostly just a safety mechanism to avoid UB.

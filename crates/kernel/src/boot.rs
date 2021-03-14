@@ -14,7 +14,7 @@ use riscv::{csr::satp, symbols};
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
 /// The base virtual addresses where the stacks for every hart are located.
-pub const KERNEL_STACK_BASE: usize = 0x000A_AAA0_0000;
+pub const KERNEL_STACK_BASE: usize = 0x001D_DD00_0000;
 
 /// The stack size for each hart.
 pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
@@ -23,6 +23,9 @@ pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
 /// this constant to any "real" physaddr returns the new physaddr which can be used if
 /// paging is activaed.
 pub const KERNEL_PHYS_MEM_BASE: usize = 0x001F_FF00_0000;
+
+/// The base virtual address where the allocator will start allocating virtual memory.
+pub const KERNEL_VMEM_ALLOC_BASE: usize = 0x0000_AA00_0000;
 
 /// The maximum number of harts that will try to be started.
 pub const HART_COUNT: usize = 4;
@@ -259,6 +262,9 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp:
             Err(err) => log::warn!("{} to start hart {}: {:?}", "Failed".yellow(), sbi_id, err),
         }
     }
+
+    // explicitly drop the guard, since this method never returns
+    drop(table);
 
     crate::main(fdt);
     loop {}

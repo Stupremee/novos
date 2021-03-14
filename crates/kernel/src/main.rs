@@ -11,13 +11,14 @@
 #![allow(clippy::missing_safety_doc, clippy::empty_loop)]
 
 pub mod allocator;
+pub mod boot;
 pub mod drivers;
 pub mod hart;
 pub mod page;
 pub mod pmem;
 pub mod unit;
+pub mod vmem;
 
-mod boot;
 mod panic;
 
 mod static_cell;
@@ -28,6 +29,13 @@ use devicetree::DeviceTree;
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
 pub fn main(_fdt: &DeviceTree<'_>) {
     log::info!("hey from main");
+
+    let x = vmem::valloc().unwrap();
+    log::info!("{:p}", x);
+    unsafe {
+        x.as_ptr().write(32);
+        log::info!("{}", *x.as_ptr());
+    }
 }
 
 /// The entry point for each new hart that is not the boot hart.
