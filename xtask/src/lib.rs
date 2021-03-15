@@ -52,7 +52,7 @@ pub fn build(cfg: Config) -> Result<()> {
     let release = if cfg.release { &["--release"] } else { &[][..] };
 
     cmd!(
-        "cargo build --target riscv64gc-unknown-none-elf -Zbuild-std=core -p kernel {release...}"
+        "cargo build --target riscv64gc-unknown-none-elf -Zbuild-std=core,alloc -p kernel {release...}"
     )
     .run()?;
     Ok(())

@@ -6,9 +6,12 @@
     naked_functions,
     panic_info_message,
     exclusive_range_pattern,
-    int_bits_const
+    int_bits_const,
+    alloc_error_handler
 )]
 #![allow(clippy::missing_safety_doc, clippy::empty_loop)]
+
+extern crate alloc;
 
 pub mod allocator;
 pub mod boot;
@@ -24,17 +27,18 @@ mod panic;
 mod static_cell;
 pub use static_cell::StaticCell;
 
+use alloc::vec::Vec;
 use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
 pub fn main(_fdt: &DeviceTree<'_>) {
     log::info!("hey from main");
 
-    let x = vmem::valloc().unwrap();
-    log::info!("{:p}", x);
-    unsafe {
-        x.as_ptr().write(32);
-        log::info!("{}", *x.as_ptr());
+    //let mut x = Vec::with_capacity(1024 * 1024 * 1024);
+    //x.push(42u32);
+    //log::info!("v: {:?}", x);
+    loop {
+        pmem::alloc().unwrap();
     }
 }
 

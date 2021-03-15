@@ -1,12 +1,9 @@
-use crate::{
-    allocator,
-    vmem::{self, Error},
-};
+use crate::{allocator, vmem};
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
 /// The number of pages to allocate when growing.
-const GROW_PAGES_COUNT: usize = 4;
+pub const GROW_PAGES_COUNT: usize = 4;
 
 /// A slab holds a bunch of objects with a fixed size.
 ///
@@ -29,17 +26,14 @@ impl Slab {
 
     /// Grow this slab by allocating a bunch of physical memory and adding it to
     /// this slab.
-    fn grow(&mut self) -> Result<(), vmem::Error> {
-        // allocate the memory to add to this slab
-        let page = vmem::valloc_pages(GROW_PAGES_COUNT)?.as_ptr();
-        let size = super::PAGE_SIZE * GROW_PAGES_COUNT;
+    pub unsafe fn grow(&mut self, page: NonNull<u8>) -> Result<(), vmem::Error> {
+        let page = page.as_ptr() as usize;
+        let size = GROW_PAGES_COUNT * allocator::PAGE_SIZE;
 
         // loop through every object that fits in the allocated memory
         // and push it to this slab
-        for obj in (page as usize..page as usize + size).step_by(self.size) {
-            unsafe {
-                self.push(NonNull::new(obj as *mut _).unwrap());
-            }
+        for obj in (page..page + size).step_by(self.size) {
+            self.push(NonNull::new(obj as *mut _).unwrap());
         }
 
         Ok(())
@@ -59,16 +53,8 @@ impl Slab {
     }
 
     /// Get one block of this block, remove it from the list and return the pointer.
-    pub fn allocate(&mut self) -> Result<NonNull<u8>, Error> {
-        if self.free_list.is_none() {
-            self.grow()?;
-        }
-
-        unsafe {
-            self.pop()
-                .map(|x| x.cast())
-                .ok_or(Error::Alloc(allocator::Error::NoMemoryAvailable))
-        }
+    pub fn allocate(&mut self) -> Option<NonNull<u8>> {
+        unsafe { self.pop().map(|x| x.cast()) }
     }
 
     /// Free a block of memory that was previously allocated by this slab.
@@ -104,24 +90,8 @@ impl SlabPool {
         }
     }
 
-    /// Allocate the given layout by using the slab with the best-fitting size.
-    pub fn allocate(&mut self, layout: Layout) -> Result<NonNull<u8>, Error> {
-        let slab = self
-            .slab_for_layout(layout)
-            .ok_or(Error::Alloc(allocator::Error::NoSlabForLayout))?;
-        slab.allocate()
-    }
-
-    /// Deallocate the given pointer that was allocated using the given layout.
-    pub unsafe fn deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), Error> {
-        let slab = self
-            .slab_for_layout(layout)
-            .ok_or(Error::Alloc(allocator::Error::NoSlabForLayout))?;
-        slab.deallocate(ptr);
-        Ok(())
-    }
-
-    fn slab_for_layout(&mut self, layout: Layout) -> Option<&mut Slab> {
+    /// Find a slab that is able to hold the given layout inside this slab pool.
+    pub fn slab_for_layout(&mut self, layout: Layout) -> Option<&mut Slab> {
         let slab = match (layout.size(), layout.align()) {
             (0..=32, 0..=32) => &mut self.slab_32,
             (0..=64, 0..=64) => &mut self.slab_64,

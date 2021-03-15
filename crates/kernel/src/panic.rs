@@ -21,3 +21,12 @@ fn panic_handler(info: &PanicInfo<'_>) -> ! {
 
     sbi::system::fail_shutdown();
 }
+
+#[alloc_error_handler]
+fn alloc_handler(layout: core::alloc::Layout) -> ! {
+    panic!(
+        "memory allocation of {} bytes and {} alignment failed",
+        layout.size(),
+        layout.align()
+    )
+}
