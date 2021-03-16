@@ -34,12 +34,14 @@ use devicetree::DeviceTree;
 pub fn main(_fdt: &DeviceTree<'_>) {
     log::info!("hey from main");
 
-    //let mut x = Vec::with_capacity(1024 * 1024 * 1024);
+    log::info!("{}", pmem::alloc_stats());
+
+    //let mut x = Vec::with_capacity(1024 * 1024);
     //x.push(42u32);
-    //log::info!("v: {:?}", x);
-    loop {
-        pmem::alloc_order(2).unwrap();
-    }
+
+    //log::info!("{:?}", x);
+    //log::info!("{}", pmem::alloc_stats());
+    sbi::system::shutdown();
 }
 
 /// The entry point for each new hart that is not the boot hart.

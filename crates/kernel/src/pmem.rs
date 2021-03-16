@@ -156,3 +156,8 @@ pub unsafe fn free(ptr: NonNull<u8>) -> Result<(), allocator::Error> {
 pub unsafe fn free_order(ptr: NonNull<u8>, order: usize) -> Result<(), allocator::Error> {
     PHYS_MEM.0.lock().deallocate(ptr, order)
 }
+
+/// Return the statistics of the global physmem allocator.
+pub fn alloc_stats() -> allocator::AllocStats {
+    PHYS_MEM.0.lock().stats()
+}

@@ -31,11 +31,11 @@ where
         let count = this as f32;
 
         match this {
-            0..KIB => write!(f, "{} B", this)?,
-            KIB..MIB => write!(f, "{:.2} KiB", count / KIB as f32)?,
-            MIB..GIB => write!(f, "{:.2} MiB", count / MIB as f32)?,
-            GIB..TIB => write!(f, "{:.2} GiB", count / GIB as f32)?,
-            _ => write!(f, "{:.2} TiB", count / TIB as f32)?,
+            0..KIB => write!(f, "{:>6} B", this)?,
+            KIB..MIB => write!(f, "{:>6.2} KiB", count / KIB as f32)?,
+            MIB..GIB => write!(f, "{:>6.2} MiB", count / MIB as f32)?,
+            GIB..TIB => write!(f, "{:>6.2} GiB", count / GIB as f32)?,
+            _ => write!(f, "{:>6.2} TiB", count / TIB as f32)?,
         };
 
         Ok(())

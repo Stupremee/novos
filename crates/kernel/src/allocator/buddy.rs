@@ -1,4 +1,4 @@
-use super::{align_up, Error, LinkedList, Result};
+use super::{align_up, AllocStats, Error, LinkedList, Result};
 use core::{cmp, ptr::NonNull};
 
 /// The maximum order for the buddy allocator (inclusive).
@@ -30,6 +30,7 @@ fn buddy_of(block: NonNull<usize>, order: usize) -> Result<NonNull<usize>> {
 /// memory using the buddy allocation algorithm.
 pub struct BuddyAllocator {
     orders: [LinkedList; MAX_ORDER],
+    stats: AllocStats,
 }
 
 impl BuddyAllocator {
@@ -37,6 +38,7 @@ impl BuddyAllocator {
     pub const fn new() -> Self {
         Self {
             orders: [LinkedList::EMPTY; MAX_ORDER],
+            stats: AllocStats::with_name("Physical Memory"),
         }
     }
 
@@ -120,6 +122,12 @@ impl BuddyAllocator {
         // push the block to the list for the given order
         let ptr = NonNull::new(start as *mut _).ok_or(Error::NullPointer)?;
         self.orders[order].push(ptr);
+
+        // update statistics
+        let size = size_for_order(order);
+        self.stats.total += size;
+        self.stats.free += size;
+
         Ok(order)
     }
 
@@ -135,6 +143,10 @@ impl BuddyAllocator {
         // fast path: if there's a block with the given order,
         // return it
         if let Some(block) = self.orders[order].pop() {
+            // update statistics
+            let size = size_for_order(order);
+            self.alloc_stats(size);
+
             return NonNull::new(block.as_ptr().cast()).ok_or(Error::NullPointer);
         }
 
@@ -154,6 +166,10 @@ impl BuddyAllocator {
 
         // push the second buddy to the free list
         unsafe { self.orders[order].push(buddy) };
+
+        // update statistics
+        let size = size_for_order(order);
+        self.alloc_stats(size);
 
         Ok(block)
     }
@@ -183,8 +199,27 @@ impl BuddyAllocator {
             // if the buddy is not free, just insert the block to deallocate
             // into the free-list
             self.orders[order].push(block.cast());
+
+            // update statistics
+            let size = size_for_order(order);
+            self.dealloc_stats(size);
         }
 
         Ok(())
+    }
+
+    /// Return a copy of the statistics for this allocator.
+    pub fn stats(&self) -> AllocStats {
+        self.stats.clone()
+    }
+
+    fn alloc_stats(&mut self, size: usize) {
+        self.stats.free = self.stats.free.saturating_sub(size);
+        self.stats.allocated = self.stats.allocated.saturating_add(size);
+    }
+
+    fn dealloc_stats(&mut self, size: usize) {
+        self.stats.free = self.stats.free.saturating_add(size);
+        self.stats.allocated = self.stats.allocated.saturating_sub(size);
     }
 }
