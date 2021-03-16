@@ -38,7 +38,7 @@ pub fn main(_fdt: &DeviceTree<'_>) {
     //x.push(42u32);
     //log::info!("v: {:?}", x);
     loop {
-        pmem::alloc().unwrap();
+        pmem::alloc_order(2).unwrap();
     }
 }
 

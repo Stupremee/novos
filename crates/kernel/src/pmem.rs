@@ -59,6 +59,14 @@ pub unsafe fn init(tree: &DeviceTree<'_>) -> Result<(), Error> {
         .try_fold(0usize, |acc, &Range { start, end }| {
             let start = NonNull::new(start as *mut u8).ok_or(Error::NullRegion)?;
             let end = NonNull::new(end as *mut u8).ok_or(Error::NullRegion)?;
+
+            log::debug!(
+                "{} memory region at {:x?}..{:x?} available as physical memory.",
+                "Making".magenta(),
+                start,
+                end
+            );
+
             let bytes = alloc.add_region(start, end).map_err(Error::Alloc)?;
 
             Ok::<_, Error>(acc + bytes)

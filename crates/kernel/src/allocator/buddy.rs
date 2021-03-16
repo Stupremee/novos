@@ -102,13 +102,15 @@ impl BuddyAllocator {
             // check if there's enough memory left for the size of
             // the next order
             let new_end = match start_addr.checked_add(size) {
-                Some(num) => num,
-                None => break,
+                Some(num) if num <= end as usize => num,
+                _ => break,
             };
 
             // if there is enough place, try the next order,
-            // otherwise we break
-            if new_end <= end as usize {
+            // otherwise we break. we also need to check if the buddy of this
+            // block would fit into the range.
+            let buddy = buddy_of(NonNull::new(start as *mut _).unwrap(), order + 1)?.as_ptr();
+            if new_end <= end as usize && (start.cast() <= buddy && buddy <= end.cast()) {
                 order += 1;
             } else {
                 break;
@@ -126,7 +128,7 @@ impl BuddyAllocator {
     /// The size for returned chunk can be calculated using [`size_for_order`].
     pub fn allocate(&mut self, order: usize) -> Result<NonNull<u8>> {
         // check if we exceeded the maximum order
-        if order > MAX_ORDER {
+        if order >= MAX_ORDER {
             return Err(Error::OrderTooLarge);
         }
 

@@ -82,8 +82,7 @@ where
     }
 
     fn get_vtable(&self) -> DynMetadata<T> {
-        let offset =
-            self.data.len() - (mem::size_of::<DynMetadata<T>>() / mem::size_of::<usize>());
+        let offset = self.data.len() - (mem::size_of::<DynMetadata<T>>() / mem::size_of::<usize>());
 
         unsafe { *self.data.as_ptr().add(offset).cast::<DynMetadata<T>>() }
     }

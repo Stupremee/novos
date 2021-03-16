@@ -106,8 +106,7 @@ pub trait PageTable {
             riscv::asm::sfence(usize::from(vaddr), None);
 
             // deallocate the page
-            pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order)
-                .map_err(Error::Alloc)?;
+            pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order).map_err(Error::Alloc)?;
         }
 
         Ok(())
