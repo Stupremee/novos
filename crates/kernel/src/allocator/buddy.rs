@@ -169,7 +169,7 @@ impl BuddyAllocator {
 
         // update statistics
         let size = size_for_order(order);
-        self.alloc_stats(size);
+        self.dealloc_stats(size);
 
         Ok(block)
     }
@@ -183,19 +183,26 @@ impl BuddyAllocator {
     pub unsafe fn deallocate(&mut self, block: NonNull<u8>, order: usize) -> Result<()> {
         // get the buddy of the block to deallocate
         let buddy_addr = buddy_of(block.cast(), order)?;
+        log::debug!("a");
 
         // check if the buddy is free
-        if let Some(buddy) = self.orders[order]
-            .iter_mut()
-            .find(|block| block.as_ptr() == Some(buddy_addr))
-        {
+        if let Some(buddy) = self.orders[order].iter_mut().find(|block| {
+            log::debug!("sdf");
+            block.as_ptr() == Some(buddy_addr)
+        }) {
+            log::debug!("b");
             // if the buddy is free, remove the buddy from the free list...
             buddy.pop();
+
+            // update statistics
+            let size = size_for_order(order);
+            self.alloc_stats(size);
 
             // ...and then go to the next level and merge both buddies
             let new_block = cmp::min(buddy_addr.cast(), block);
             self.deallocate(new_block, order + 1)?;
         } else {
+            log::debug!("c");
             // if the buddy is not free, just insert the block to deallocate
             // into the free-list
             self.orders[order].push(block.cast());
@@ -208,18 +215,18 @@ impl BuddyAllocator {
         Ok(())
     }
 
-    /// Return a copy of the statistics for this allocator.
+    /// Return a copy of the statistics of this buddy allocator.
     pub fn stats(&self) -> AllocStats {
         self.stats.clone()
     }
 
     fn alloc_stats(&mut self, size: usize) {
-        self.stats.free = self.stats.free.saturating_sub(size);
-        self.stats.allocated = self.stats.allocated.saturating_add(size);
+        self.stats.free -= size;
+        self.stats.allocated += size;
     }
 
     fn dealloc_stats(&mut self, size: usize) {
-        self.stats.free = self.stats.free.saturating_add(size);
-        self.stats.allocated = self.stats.allocated.saturating_sub(size);
+        self.stats.free += size;
+        self.stats.allocated -= size;
     }
 }

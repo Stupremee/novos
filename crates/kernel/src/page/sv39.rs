@@ -38,15 +38,15 @@ impl Table {
             match entry.kind()? {
                 // we found a mapped address, so break the loop
                 EntryKind::Leaf => break PhysAddr::from(entry as *const _),
-                EntryKind::Branch(new_table) => {
+                EntryKind::Branch(new_table_ptr) => {
                     // this entry points to the next level, so traverse the next level
-                    let new_table = phys2virt(new_table.as_ptr::<u8>());
+                    let new_table = phys2virt(new_table_ptr.as_ptr::<u8>());
                     table = unsafe { new_table.as_ptr::<Table>().as_mut().unwrap() };
 
                     // update the level 1 and 2 table variable to return them later
                     match idx {
-                        1 => table_kib = Some(NonNull::new(new_table.as_ptr()).unwrap()),
-                        2 => table_mib = Some(NonNull::new(new_table.as_ptr()).unwrap()),
+                        1 => table_kib = Some(new_table_ptr),
+                        2 => table_mib = Some(new_table_ptr),
                         _ => {}
                     }
                 }
@@ -177,10 +177,6 @@ impl super::PageTable for Table {
             None => return Ok(false),
         };
 
-        // conert addresses to references
-        let table_kib = table_kib.map(|table| unsafe { &mut *table.as_ptr() });
-        let mut table_mib = table_mib.map(|table| unsafe { &mut *table.as_ptr() });
-
         // clear the entry by zeroing it
         unsafe {
             core::ptr::write_volatile(entry, Entry::EMPTY);
@@ -188,25 +184,33 @@ impl super::PageTable for Table {
 
         // if we have a level 2 table, check if we can free the table
         if let Some(table) = table_kib {
-            if table.is_empty() {
+            // get a rust reference to the table
+            let table_ref = unsafe { &mut *phys2virt(table).as_ptr::<Table>() };
+
+            if table_ref.is_empty() {
                 // if we free this table,
                 // we also need to remove the entry from the level 1 table
-                table_mib.as_mut().unwrap().entries[vpn[1]].set(0);
+                let table_mib = unsafe { &mut *phys2virt(table_mib.unwrap()).as_ptr::<Table>() };
+                table_mib.entries[vpn[1]].set(0);
 
                 unsafe {
-                    table.free_mem()?;
+                    pmem::free(NonNull::new(table.as_ptr()).unwrap()).map_err(Error::Alloc)?;
                 }
             }
         }
 
         // now try to free the level 1 table
         if let Some(table) = table_mib {
-            if table.is_empty() {
+            // get a rust reference to the table
+            let table_ref = unsafe { &mut *phys2virt(table).as_ptr::<Table>() };
+
+            if table_ref.is_empty() {
                 // if we free this table,
                 // we also need to remove the entry from the level 0 table
                 self.entries[vpn[2]].set(0);
+
                 unsafe {
-                    table.free_mem()?;
+                    pmem::free(NonNull::new(table.as_ptr()).unwrap()).map_err(Error::Alloc)?;
                 }
             }
         }
@@ -240,8 +244,8 @@ impl super::PageTable for Table {
 /// The tables are used inside unmap to free them if neccessary.
 #[derive(Debug)]
 struct Mapping {
-    table_mib: Option<NonNull<Table>>,
-    table_kib: Option<NonNull<Table>>,
+    table_mib: Option<PhysAddr>,
+    table_kib: Option<PhysAddr>,
 
     entry: *mut Entry,
     size: PageSize,

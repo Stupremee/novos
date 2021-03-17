@@ -23,11 +23,11 @@ displaydoc_lite::displaydoc! {
     }
 }
 
-/// Get a new vaddr that is able to n pages.
+/// Get a new vaddr that is able to n bytes.
 fn next_vaddr(n: usize) -> VirtAddr {
     static VMEM_ALLOC_ADDR: AtomicUsize = AtomicUsize::new(KERNEL_VMEM_ALLOC_BASE);
 
-    let vaddr = VMEM_ALLOC_ADDR.fetch_add(n * PAGE_SIZE, Ordering::AcqRel);
+    let vaddr = VMEM_ALLOC_ADDR.fetch_add(n, Ordering::AcqRel);
     vaddr.into()
 }
 
@@ -48,29 +48,25 @@ impl FreeList {
     /// Pop a page from this free list. If no page is available, allocate a bunch of
     /// new pages for this free list.
     fn pop(&mut self) -> Result<NonNull<u8>, Error> {
-        const BULK_PAGE_COUNT: usize = 4;
-
         // if this list is empty, allocate new pages
         if self.head.is_none() {
             // get the size of each page inside this freelist
             let size = allocator::size_for_order(self.order);
 
             // get a new vaddr and allocate the new memory
-            let vaddr = next_vaddr(BULK_PAGE_COUNT);
+            let vaddr = next_vaddr(size);
             page::root()
                 .map_alloc(
                     vaddr,
-                    BULK_PAGE_COUNT * size,
+                    size / PAGE_SIZE,
                     PageSize::Kilopage,
                     Perm::READ | Perm::WRITE,
                 )
                 .map_err(Error::Page)?;
 
-            // push each page that was allocated previously
-            for page in (usize::from(vaddr)..usize::from(vaddr) + size).step_by(size) {
-                unsafe {
-                    self.push(NonNull::new(page as *mut _).unwrap());
-                }
+            // push the new allocated page to this linked list
+            unsafe {
+                self.push(NonNull::new(vaddr.as_ptr()).unwrap());
             }
         }
 
@@ -169,6 +165,41 @@ impl VirtualAllocator {
         // return the fresh allocated memory
         Ok(NonNull::new(vaddr.as_ptr()).unwrap())
     }
+
+    unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) -> Result<(), Error> {
+        // FIXME
+        assert!(
+            layout.align() <= 4096,
+            "allocating >4096 alignment not supported currently"
+        );
+
+        // first, we try to find a slab that may allocated the object
+        if let Some(slab) = self.slabs.slab_for_layout(layout) {
+            // if we found a slab, the block came from this slab so push it back
+            // to the slab
+            slab.deallocate(ptr);
+            return Ok(());
+        }
+
+        // the next step is, to look at the list of free-lists for the order
+        // the layout needs
+        let order = allocator::order_for_size(layout.size());
+
+        // if there's a list for this order, push the page from it.
+        if let Some(list) = self.free_lists.get_mut(order) {
+            list.push(ptr);
+            return Ok(());
+        }
+
+        // last step, if there's no free lsit for the requested size, manually free the memory
+        let size = allocator::align_up(layout.size(), allocator::PAGE_SIZE);
+        page::root()
+            .free(ptr.as_ptr().into(), size / allocator::PAGE_SIZE)
+            .map_err(Error::Page)?;
+
+        // successfully freed memory
+        Ok(())
+    }
 }
 
 #[global_allocator]
@@ -197,7 +228,19 @@ unsafe impl GlobalAlloc for GlobalAllocator {
         }
     }
 
-    unsafe fn dealloc(&self, _: *mut u8, _: Layout) {
-        //todo!()
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        let mut res = self.0.lock();
+        match res.dealloc(NonNull::new(ptr).unwrap(), layout) {
+            Ok(()) => (),
+            Err(err) => {
+                log::warn!(
+                    "{} to free memory (size: {} align: {}): {}",
+                    "Failed".yellow(),
+                    layout.size(),
+                    layout.align(),
+                    err
+                );
+            }
+        }
     }
 }

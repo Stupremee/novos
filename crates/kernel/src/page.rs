@@ -80,7 +80,7 @@ pub trait PageTable {
     /// The count *must* be the same number used for allocation.
     unsafe fn free(&mut self, vaddr: VirtAddr, count: usize) -> Result<(), Error> {
         // translate the first page manually, to get the page size
-        let (first_page, page_size) = self.translate(vaddr).unwrap();
+        let (_, page_size) = self.translate(vaddr).unwrap();
         let end = usize::from(vaddr) + (page_size.size() * count);
 
         // the order that will be used for the buddy allocator for freeing the pages
@@ -90,15 +90,11 @@ pub trait PageTable {
             PageSize::Gigapage => unimplemented!(),
         };
 
-        // unmap and deallocate the now free'd page
-        assert!(self.unmap(vaddr)?);
-        pmem::free_order(NonNull::new(first_page.as_ptr()).unwrap(), order)
-            .map_err(Error::Alloc)?;
-
         // loop through the rest of the pages and deallocate them too
-        for page in (usize::from(vaddr) + page_size.size()..end).step_by(page_size.size()) {
+        for page in (usize::from(vaddr)..end).step_by(page_size.size()) {
             // translate the address to find the physaddr which we need for deallocation
             let (paddr, _) = self.translate(page.into()).unwrap();
+            log::debug!("freeing {:p}", paddr.as_ptr::<usize>());
 
             // unmap the page
             assert!(self.unmap(page.into())?);
@@ -106,7 +102,8 @@ pub trait PageTable {
             riscv::asm::sfence(usize::from(vaddr), None);
 
             // deallocate the page
-            pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order).map_err(Error::Alloc)?;
+            pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order)
+                .map_err(Error::Alloc)?;
         }
 
         Ok(())
