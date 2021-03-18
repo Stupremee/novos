@@ -78,12 +78,6 @@ impl Table {
     fn is_empty(&self) -> bool {
         self.entries.iter().all(|ent| ent.kind().is_none())
     }
-
-    /// Deallocate the underlying memory of this table through the reference.
-    unsafe fn free_mem(&self) -> Result<(), Error> {
-        let page = NonNull::new(self as *const _ as *mut u8).unwrap();
-        pmem::free(page).map_err(Error::Alloc)
-    }
 }
 
 impl super::PageTable for Table {

@@ -1,4 +1,5 @@
-use super::{align_up, AllocStats, Error, LinkedList, Result};
+use super::{align_up, AllocStats, Error, Result};
+use crate::page::phys2virt;
 use core::{cmp, ptr::NonNull};
 
 /// The maximum order for the buddy allocator (inclusive).
@@ -6,17 +7,21 @@ use core::{cmp, ptr::NonNull};
 /// This means, that orders 0..MAX_ORDER are available.
 pub const MAX_ORDER: usize = 12;
 
+/// The size of the order `0`, thus it's the smallest possible size
+/// that can be allocated.
+pub const MIN_ORDER_SIZE: usize = super::PAGE_SIZE;
+
 /// Calculates the size in bytes for the given order.
 pub fn size_for_order(order: usize) -> usize {
-    (1 << order) * super::PAGE_SIZE
+    (1 << order) * MIN_ORDER_SIZE
 }
 
 /// Calculates the first order where the given `size` would fit in.
 ///
 /// This function may return an order that is larger than [`MAX_ORDER`].
 pub fn order_for_size(size: usize) -> usize {
-    let size = cmp::max(size, super::PAGE_SIZE);
-    let size = size.next_power_of_two() / super::PAGE_SIZE;
+    let size = cmp::max(size, MIN_ORDER_SIZE);
+    let size = size.next_power_of_two() / MIN_ORDER_SIZE;
     size.trailing_zeros() as usize
 }
 
@@ -29,7 +34,7 @@ fn buddy_of(block: NonNull<usize>, order: usize) -> Result<NonNull<usize>> {
 /// The central structure that is responsible for allocating
 /// memory using the buddy allocation algorithm.
 pub struct BuddyAllocator {
-    orders: [LinkedList; MAX_ORDER],
+    orders: [Option<NonNull<ListNode>>; MAX_ORDER],
     stats: AllocStats,
 }
 
@@ -37,7 +42,7 @@ impl BuddyAllocator {
     /// Create a empty and uninitialized buddy allocator.
     pub const fn new() -> Self {
         Self {
-            orders: [LinkedList::EMPTY; MAX_ORDER],
+            orders: [None; MAX_ORDER],
             stats: AllocStats::with_name("Physical Memory"),
         }
     }
@@ -49,23 +54,19 @@ impl BuddyAllocator {
     /// If the region size is not a multiple of the [pagesize](super::PAGE_SIZE),
     /// the memory that is leftover will stay untouuched.
     ///
-    /// If the `start` pointer is not aligned to the word size it will be aligned
+    /// If the `start` pointer is not aligned to the page size it will be aligned
     /// correctly before added to this allocator.
     ///
     /// Returns the total number of bytes that were added to this allocator.
-    ///
-    /// # Safety
-    ///
-    /// `start` and `end` must be valid to write for the entire lifetime of this allocator.
     pub unsafe fn add_region(&mut self, start: NonNull<u8>, end: NonNull<u8>) -> Result<usize> {
         // align the pointer to the page size
         let start = start.as_ptr();
-        let mut start = align_up(start as _, super::PAGE_SIZE) as *mut u8;
+        let mut start = align_up(start as _, MIN_ORDER_SIZE) as *mut u8;
         let end = end.as_ptr();
 
         // check if there's enough memory for at least
         // one page
-        if (end as usize).saturating_sub(start as usize) < super::PAGE_SIZE {
+        if (end as usize).saturating_sub(start as usize) < MIN_ORDER_SIZE {
             return Err(Error::RegionTooSmall);
         }
 
@@ -76,7 +77,7 @@ impl BuddyAllocator {
 
         // loop until there's not enough memory left to allocate a single page
         let mut total = 0;
-        while (end as usize).saturating_sub(start as usize) >= super::PAGE_SIZE {
+        while (end as usize).saturating_sub(start as usize) >= MIN_ORDER_SIZE {
             let order = self.add_single_region(start, end)?;
             let size = size_for_order(order);
 
@@ -120,8 +121,7 @@ impl BuddyAllocator {
         }
 
         // push the block to the list for the given order
-        let ptr = NonNull::new(start as *mut _).ok_or(Error::NullPointer)?;
-        self.orders[order].push(ptr);
+        self.order_push(order, NonNull::new(start).unwrap().cast());
 
         // update statistics
         let size = size_for_order(order);
@@ -142,7 +142,7 @@ impl BuddyAllocator {
 
         // fast path: if there's a block with the given order,
         // return it
-        if let Some(block) = self.orders[order].pop() {
+        if let Some(block) = self.order_pop(order) {
             // update statistics
             let size = size_for_order(order);
             self.alloc_stats(size);
@@ -165,7 +165,7 @@ impl BuddyAllocator {
         let buddy = buddy_of(block.cast(), order)?;
 
         // push the second buddy to the free list
-        unsafe { self.orders[order].push(buddy) };
+        self.order_push(order, buddy.cast());
 
         // update statistics
         let size = size_for_order(order);
@@ -183,17 +183,10 @@ impl BuddyAllocator {
     pub unsafe fn deallocate(&mut self, block: NonNull<u8>, order: usize) -> Result<()> {
         // get the buddy of the block to deallocate
         let buddy_addr = buddy_of(block.cast(), order)?;
-        log::debug!("a");
 
-        // check if the buddy is free
-        if let Some(buddy) = self.orders[order].iter_mut().find(|block| {
-            log::debug!("sdf");
-            block.as_ptr() == Some(buddy_addr)
-        }) {
-            log::debug!("b");
-            // if the buddy is free, remove the buddy from the free list...
-            buddy.pop();
-
+        // check if the buddy is free, if so remove it and
+        // free walk up to try merge again
+        if self.order_remove(order, buddy_addr.cast()) {
             // update statistics
             let size = size_for_order(order);
             self.alloc_stats(size);
@@ -202,10 +195,9 @@ impl BuddyAllocator {
             let new_block = cmp::min(buddy_addr.cast(), block);
             self.deallocate(new_block, order + 1)?;
         } else {
-            log::debug!("c");
             // if the buddy is not free, just insert the block to deallocate
             // into the free-list
-            self.orders[order].push(block.cast());
+            self.order_push(order, block.cast());
 
             // update statistics
             let size = size_for_order(order);
@@ -220,6 +212,58 @@ impl BuddyAllocator {
         self.stats.clone()
     }
 
+    /// Push the given block onto the free list of the given order.
+    fn order_push(&mut self, order: usize, ptr: NonNull<ListNode>) {
+        let head = self.orders[order];
+
+        unsafe {
+            let vptr = phys2virt(ptr.as_ptr());
+            vptr.as_ptr::<ListNode>().write(ListNode { next: head });
+        }
+
+        self.orders[order] = Some(ptr.cast());
+    }
+
+    /// Pop an entry from the free list for the given order.
+    fn order_pop(&mut self, order: usize) -> Option<NonNull<ListNode>> {
+        let head = self.orders[order]?;
+        let vhead = phys2virt(head.as_ptr());
+
+        unsafe {
+            self.orders[order] = (*vhead.as_ptr::<ListNode>()).next;
+        }
+
+        Some(head)
+    }
+
+    /// Try to remove the given ptr from the free list for the given order.
+    ///
+    /// Returns whether the remove was successful.
+    fn order_remove(&mut self, order: usize, to_remove: NonNull<ListNode>) -> bool {
+        let mut cur: *mut Option<NonNull<ListNode>> = &mut self.orders[order];
+
+        // walk through the linked list
+        while let Some(ptr) = unsafe { *cur } {
+            let vptr = phys2virt(ptr.as_ptr()).as_ptr::<ListNode>();
+
+            // if this is the block to remove...
+            if ptr == to_remove {
+                // ...remove it and return
+                unsafe {
+                    *cur = (*vptr).next;
+                }
+                return true;
+            }
+
+            // go to the next entry
+            unsafe {
+                cur = &mut (*vptr).next;
+            }
+        }
+
+        false
+    }
+
     fn alloc_stats(&mut self, size: usize) {
         self.stats.free -= size;
         self.stats.allocated += size;
@@ -229,4 +273,8 @@ impl BuddyAllocator {
         self.stats.free += size;
         self.stats.allocated -= size;
     }
+}
+
+struct ListNode {
+    next: Option<NonNull<ListNode>>,
 }

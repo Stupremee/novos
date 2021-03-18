@@ -94,7 +94,6 @@ pub trait PageTable {
         for page in (usize::from(vaddr)..end).step_by(page_size.size()) {
             // translate the address to find the physaddr which we need for deallocation
             let (paddr, _) = self.translate(page.into()).unwrap();
-            log::debug!("freeing {:p}", paddr.as_ptr::<usize>());
 
             // unmap the page
             assert!(self.unmap(page.into())?);
