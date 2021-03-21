@@ -3,15 +3,13 @@
 mod vaddr;
 
 use crate::allocator::slab::SlabPool;
-use crate::boot::KERNEL_VMEM_ALLOC_BASE;
-use crate::page::{PageSize, PageTable, Perm, VirtAddr};
+use crate::page::{PageSize, PageTable, Perm};
 use crate::{
     allocator::{self, buddy::MAX_ORDER, slab, PAGE_SIZE},
     page,
 };
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use riscv::sync::Mutex;
 
 displaydoc_lite::displaydoc! {
@@ -23,14 +21,6 @@ displaydoc_lite::displaydoc! {
         /// {_0}
         Page(page::Error),
     }
-}
-
-/// Get a new vaddr that is able to n bytes.
-fn next_vaddr(n: usize) -> VirtAddr {
-    static VMEM_ALLOC_ADDR: AtomicUsize = AtomicUsize::new(KERNEL_VMEM_ALLOC_BASE);
-
-    let vaddr = VMEM_ALLOC_ADDR.fetch_add(n, Ordering::AcqRel);
-    vaddr.into()
 }
 
 /// The freelist is used to cache the pages for every order.
@@ -56,7 +46,7 @@ impl FreeList {
             let size = allocator::size_for_order(self.order);
 
             // get a new vaddr and allocate the new memory
-            let vaddr = next_vaddr(size);
+            let vaddr = vaddr::global().next_vaddr_4k(size / PAGE_SIZE);
             page::root()
                 .map_alloc(
                     vaddr,
@@ -131,7 +121,7 @@ impl VirtualAllocator {
             }
 
             // otherwise grow the slab and try again
-            let order = allocator::order_for_size(slab::GROW_PAGES_COUNT * allocator::PAGE_SIZE);
+            let order = allocator::order_for_size(slab::GROW_PAGES_COUNT * PAGE_SIZE);
             let page = self.free_lists[order].pop()?;
             unsafe {
                 slab.grow(page)?;
@@ -153,12 +143,12 @@ impl VirtualAllocator {
 
         // last step, if there's no free lsit for the requested size, manually allocate
         // the memory required for the allocation
-        let size = allocator::align_up(layout.size(), allocator::PAGE_SIZE);
-        let vaddr = next_vaddr(size);
+        let size = allocator::align_up(layout.size(), PAGE_SIZE);
+        let vaddr = vaddr::global().next_vaddr_4k(size / PAGE_SIZE);
         page::root()
             .map_alloc(
                 vaddr,
-                size / allocator::PAGE_SIZE,
+                size / PAGE_SIZE,
                 PageSize::Kilopage,
                 Perm::READ | Perm::WRITE,
             )
@@ -194,10 +184,13 @@ impl VirtualAllocator {
         }
 
         // last step, if there's no free lsit for the requested size, manually free the memory
-        let size = allocator::align_up(layout.size(), allocator::PAGE_SIZE);
+        let size = allocator::align_up(layout.size(), PAGE_SIZE);
         page::root()
-            .free(ptr.as_ptr().into(), size / allocator::PAGE_SIZE)
+            .free(ptr.as_ptr().into(), size / PAGE_SIZE)
             .map_err(Error::Page)?;
+
+        // tell the vaddr allocator that the address is free to use again
+        vaddr::global().free_vaddr_4k(ptr.as_ptr().into(), size / PAGE_SIZE);
 
         // successfully freed memory
         Ok(())

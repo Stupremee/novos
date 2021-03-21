@@ -39,8 +39,16 @@ pub fn main(_fdt: &DeviceTree<'_>) {
 
     for i in 0..10 {
         log::info!("start {}", i);
-        let x = Vec::<u8>::with_capacity(1024 * 1024 * 1024);
-        assert!(x.is_empty());
+        let mut x = Vec::<u8>::with_capacity(9 * 1024 * 1024);
+        let mut y = Vec::<u8>::with_capacity(16 * 1024);
+
+        log::info!("at x {:p}", x.as_ptr());
+        log::info!("at y {:p}", y.as_ptr());
+
+        x.push(i);
+        assert!(x[0] == i);
+        y.push(i + 1);
+        assert!(y[0] == i + 1);
     }
 
     log::info!("{}", pmem::alloc_stats());

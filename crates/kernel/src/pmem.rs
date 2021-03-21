@@ -122,6 +122,7 @@ unsafe impl Allocator for PhysicalAllocator {
         // perform the allocation
         match self.0.lock().allocate(order) {
             Ok(ptr) => {
+                let ptr = page::phys2virt(ptr.as_ptr());
                 let slice = ptr::slice_from_raw_parts_mut(ptr.as_ptr(), size);
                 Ok(unsafe { NonNull::new_unchecked(slice) })
             }
@@ -138,11 +139,18 @@ unsafe impl Allocator for PhysicalAllocator {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        use page::PageTable;
+
         // get the order for the requested size
         let order = allocator::order_for_size(layout.size());
+        let (ptr, _) = page::root().translate(ptr.as_ptr().into()).unwrap();
 
         // perform the deallocation
-        match self.0.lock().deallocate(ptr, order) {
+        match self
+            .0
+            .lock()
+            .deallocate(NonNull::new(ptr.as_ptr()).unwrap(), order)
+        {
             Ok(()) => {}
             Err(err) => {
                 log::warn!(
