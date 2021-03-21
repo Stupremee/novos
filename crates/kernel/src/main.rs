@@ -7,7 +7,8 @@
     panic_info_message,
     exclusive_range_pattern,
     int_bits_const,
-    alloc_error_handler
+    alloc_error_handler,
+    allocator_api
 )]
 #![allow(clippy::missing_safety_doc, clippy::empty_loop)]
 

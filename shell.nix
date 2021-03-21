@@ -6,6 +6,7 @@ in pkgs.mkShell {
     rust
     llvm_11
     unstable.qemu
+    spike
     python3
     dtc
     cargo-expand

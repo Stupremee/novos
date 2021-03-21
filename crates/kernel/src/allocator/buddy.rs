@@ -31,6 +31,10 @@ fn buddy_of(block: NonNull<usize>, order: usize) -> Result<NonNull<usize>> {
     NonNull::new(buddy as *mut _).ok_or(Error::NullPointer)
 }
 
+struct ListNode {
+    next: Option<NonNull<ListNode>>,
+}
+
 /// The central structure that is responsible for allocating
 /// memory using the buddy allocation algorithm.
 pub struct BuddyAllocator {
@@ -273,8 +277,4 @@ impl BuddyAllocator {
         self.stats.free += size;
         self.stats.allocated -= size;
     }
-}
-
-struct ListNode {
-    next: Option<NonNull<ListNode>>,
 }

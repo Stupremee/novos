@@ -1,7 +1,8 @@
 //! Management of physical memory, including initialization and global allocation.
 
+use core::alloc::{AllocError, Allocator, Layout};
 use core::ptr::NonNull;
-use core::{array, mem, slice};
+use core::{array, mem, ptr, slice};
 
 use crate::allocator::{
     self,
@@ -96,10 +97,64 @@ fn get_blocked_ranges() -> [Range; 2] {
 
 static PHYS_MEM: PhysicalAllocator = PhysicalAllocator(Mutex::new(BuddyAllocator::new()));
 
-struct PhysicalAllocator(Mutex<BuddyAllocator>);
+/// The global allocator that is responsible for allocating phyical memory.
+pub struct PhysicalAllocator(Mutex<BuddyAllocator>);
 
 unsafe impl Send for PhysicalAllocator {}
 unsafe impl Sync for PhysicalAllocator {}
+
+unsafe impl Allocator for PhysicalAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        // the buddy allocator could technically allocate larger alignments,
+        // but we don't need that at the moment
+        if layout.align() > allocator::PAGE_SIZE {
+            log::warn!(
+                "{} to allocate physical memory: requested alignment was too big",
+                "Failed".yellow()
+            );
+            return Err(AllocError);
+        }
+
+        // get the order for the requested size
+        let order = allocator::order_for_size(layout.size());
+        let size = allocator::size_for_order(order);
+
+        // perform the allocation
+        match self.0.lock().allocate(order) {
+            Ok(ptr) => {
+                let slice = ptr::slice_from_raw_parts_mut(ptr.as_ptr(), size);
+                Ok(unsafe { NonNull::new_unchecked(slice) })
+            }
+            Err(err) => {
+                log::warn!(
+                    "{} to allocate physical memory (order: {}): {}",
+                    "Failed".yellow(),
+                    order,
+                    err
+                );
+                Err(AllocError)
+            }
+        }
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // get the order for the requested size
+        let order = allocator::order_for_size(layout.size());
+
+        // perform the deallocation
+        match self.0.lock().deallocate(ptr, order) {
+            Ok(()) => {}
+            Err(err) => {
+                log::warn!(
+                    "{} to free physical memory (order: {}): {}",
+                    "Failed".yellow(),
+                    order,
+                    err
+                );
+            }
+        }
+    }
+}
 
 /// Allocate a single page of physical memory.
 #[inline]
@@ -155,6 +210,11 @@ pub unsafe fn free(ptr: NonNull<u8>) -> Result<(), allocator::Error> {
 #[inline]
 pub unsafe fn free_order(ptr: NonNull<u8>, order: usize) -> Result<(), allocator::Error> {
     PHYS_MEM.0.lock().deallocate(ptr, order)
+}
+
+/// Get access to the global physmem allocator.
+pub fn phys_alloc() -> &'static PhysicalAllocator {
+    &PHYS_MEM
 }
 
 /// Return the statistics of the global physmem allocator.
