@@ -30,19 +30,19 @@ displaydoc! {
     /// Any error that can happen while allocating or deallocating memory.
     #[derive(Debug)]
     pub enum Error {
-        /// tried to add a region to an allocator that was too small.
+        /// region was too small
         RegionTooSmall,
-        /// the `end` pointer of a memory region was before the `start` pointer.
+        /// the `end` pointer of a memory region was before the `start` pointer
         InvalidRegion,
-        /// tried to allocate an order that exceeded the maximum order.
+        /// order exceeded the maximum order
         OrderTooLarge,
-        /// tried to allocate, but there was no free memory left.
+        /// no free memory left
         NoMemoryAvailable,
-        /// tried to allocate zero pages using `alloc_pages`
+        /// can't allocate zero pages
         AllocateZeroPages,
         /// this is not a real error and should never be thrown somewhere
         NoSlabForLayout,
-        /// Tried to create a `NonNull` from a null pointer.
+        /// `NonNull` was null
         ///
         /// Mostly just a safety mechanism to avoid UB.
         NullPointer,

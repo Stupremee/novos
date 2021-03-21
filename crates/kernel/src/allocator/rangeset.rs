@@ -11,9 +11,9 @@ displaydoc_lite::displaydoc! {
     /// Any error that can occurr while operating on a [`RangeSet`].
     #[derive(Clone, Debug)]
     pub enum Error {
-        /// the range was invalid, meaning that `start > end`.
+        /// the range was invalid
         InvalidRange,
-        /// a given index was out of bounds.
+        /// index out of bounds.
         OutOfBounds,
     }
 }

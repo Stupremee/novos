@@ -1,5 +1,7 @@
 //! Virtual memory allocator.
 
+mod vaddr;
+
 use crate::allocator::slab::SlabPool;
 use crate::boot::KERNEL_VMEM_ALLOC_BASE;
 use crate::page::{PageSize, PageTable, Perm, VirtAddr};

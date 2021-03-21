@@ -16,13 +16,11 @@ displaydoc_lite::displaydoc! {
     /// Errors that are related to paging.
     #[derive(Debug)]
     pub enum Error {
-        /// tried to map an address that is not aligned to the page size
+        /// address not aligned
         UnalignedAddress,
-        /// tried to identity map a range using a page size that can't fit into the range
-        RangeTooSmall,
-        /// tried to map an address which was already mapped
+        /// address already mapped
         AlreadyMapped,
-        /// failed to allocate a new page: `{_0}`
+        /// {_0}
         Alloc(allocator::Error),
     }
 }

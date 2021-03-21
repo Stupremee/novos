@@ -20,7 +20,7 @@ displaydoc_lite::displaydoc! {
         RangeSet(rangeset::Error),
         /// {_0}
         Alloc(allocator::Error),
-        /// tried to add a region of memory that starts at address zero
+        /// memory region starts at address 0
         NullRegion,
     }
 }
