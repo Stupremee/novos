@@ -18,6 +18,7 @@ pub mod allocator;
 pub mod boot;
 pub mod drivers;
 pub mod hart;
+pub mod interrupt;
 pub mod page;
 pub mod pmem;
 pub mod unit;
@@ -33,17 +34,12 @@ use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
 pub fn main(_fdt: &DeviceTree<'_>) {
-    log::info!("hey from main");
-
     log::info!("{}", pmem::alloc_stats());
 
     for i in 0..10 {
         log::info!("start {}", i);
         let mut x = Vec::<u8>::with_capacity(9 * 1024 * 1024);
         let mut y = Vec::<u8>::with_capacity(16 * 1024);
-
-        log::info!("at x {:p}", x.as_ptr());
-        log::info!("at y {:p}", y.as_ptr());
 
         x.push(i);
         assert!(x[0] == i);

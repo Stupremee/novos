@@ -3,7 +3,7 @@
 use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
 use crate::drivers::{ns16550a, DeviceTreeDriver};
 use crate::{
-    hart,
+    hart, interrupt,
     page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
     pmem, unit, StaticCell,
 };
@@ -100,6 +100,9 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
         }
     }
 
+    // install the interrupt handler
+    interrupt::install_handler();
+
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
 
@@ -113,9 +116,6 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 
     let new_fdt = slice::from_raw_parts_mut(new_fdt.as_ptr(), size_for_order(fdt_order));
     let fdt: DeviceTree<'static> = fdt.copy_to_slice(new_fdt);
-
-    // initialize hart local storage and hart context
-    hart::init_hart_context(0).unwrap();
 
     // get access to the global page table
     let table = &mut *PAGE_TABLE.get();
@@ -266,6 +266,14 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp:
     // explicitly drop the guard, since this method never returns
     drop(table);
 
+    // initialize hart local storage and hart context
+    hart::init_hart_context(0).unwrap();
+    log::info!(
+        "{} with id {} online.",
+        "Hart".green(),
+        hart::current().id()
+    );
+
     crate::main(fdt);
     loop {}
     //sbi::system::shutdown()
@@ -274,36 +282,12 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp:
 /// Raw entrypoint for new harts that are started by the booting hart.
 #[naked]
 unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
-    asm!("
-        ld sp, -16(a1)
-        ld t0, -24(a1)
-        li t1, 24
-        mv sp, a1
-        sub sp, sp, t1
-        mv a0, sp
-
-        csrw satp, t0
-        j {entry}
+    asm!(
+        "
+    2: j 2b
     ",
-        entry = sym rust_hart_entry,
         options(noreturn)
     )
-}
-
-/// The rust version of the entry for every hart, to avoid marking
-/// the hart main function as `extern "C"`.
-#[no_mangle]
-unsafe extern "C" fn rust_hart_entry(args: &'static HartArgs) -> ! {
-    // initialize the context of the current hart
-    hart::init_hart_context(args.id).unwrap();
-    log::info!(
-        "{} with id {} online.",
-        "Hart".green(),
-        hart::current().id()
-    );
-
-    crate::hmain();
-    loop {}
 }
 
 /// The entrypoint for the whole kernel.

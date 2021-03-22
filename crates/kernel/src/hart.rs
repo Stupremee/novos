@@ -1,7 +1,13 @@
 //! Hart local storage and context.
 
-use crate::{allocator, pmem};
-use core::cell::Cell;
+use crate::{allocator, unit};
+use alloc::boxed::Box;
+use alloc::vec;
+use core::mem::ManuallyDrop;
+use core::ptr::NonNull;
+
+/// The size of each trap stack.
+pub const TRAP_STACK_SIZE: usize = 4 * unit::KIB;
 
 /// This structure is replicated on every hart and stores
 /// hart-local information like a trap-stack or the hart id.
@@ -9,7 +15,12 @@ use core::cell::Cell;
 pub struct HartContext {
     /// The id of this hart, this is our own generated id and is not compatible
     /// with the hart id given by opensbi.
-    id: Cell<u64>,
+    id: u64,
+    /// A pointer to the stack that must be used during interrupts. This pointer will point to
+    /// the end of the trap stack inside virtual memory space.
+    trap_stack: NonNull<u8>,
+    /// Location to temporarily store the stack pointer inside the interrupt handler.
+    temp_sp: usize,
 }
 
 impl HartContext {
@@ -19,7 +30,7 @@ impl HartContext {
     /// with the hart id given by opensbi.
     #[inline]
     pub fn id(&self) -> u64 {
-        self.id.get()
+        self.id
     }
 }
 
@@ -36,18 +47,22 @@ pub fn current() -> &'static HartContext {
 /// Initializes the context for this hart by allocating memory and then saving
 /// the pointer inside the `sscratch` CSR.
 pub unsafe fn init_hart_context(hart_id: u64) -> Result<(), allocator::Error> {
-    // allocate the memory for the context
-    let page = pmem::alloc()?;
+    // allocate the trap stack
+    let mut stack = ManuallyDrop::new(vec![0u8; TRAP_STACK_SIZE]);
 
     // create the hart context and write it to the page
     let ctx = HartContext {
-        id: Cell::new(hart_id),
+        id: hart_id,
+        trap_stack: NonNull::new(stack.as_mut_ptr().add(TRAP_STACK_SIZE)).unwrap(),
+        temp_sp: 0,
     };
-    core::ptr::write_volatile(page.as_ptr().cast(), ctx);
+
+    // box up the context so it's stored on the heap
+    let ptr = Box::into_raw(Box::new(ctx));
 
     // store the address inside the sscratch register to make it
     // available everywhere on this hart
-    asm!("csrw sscratch, {}", in(reg) page.as_ptr());
+    asm!("csrw sscratch, {}", in(reg) ptr);
 
     Ok(())
 }
