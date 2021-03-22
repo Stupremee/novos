@@ -7,7 +7,7 @@ use crate::{
     page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
     pmem, unit, StaticCell,
 };
-use core::{mem, slice};
+use core::slice;
 use devicetree::DeviceTree;
 use riscv::{csr::satp, symbols};
 
@@ -30,22 +30,14 @@ pub const KERNEL_VMEM_ALLOC_BASE: usize = 0x0000_AA00_0000;
 /// The maximum number of harts that will try to be started.
 pub const HART_COUNT: usize = 4;
 
-/// Structure that is used to pass data to the harts that are started
-/// from the boot hart.
-#[repr(C)]
-struct HartArgs {
-    id: u64,
-    stack: *const u8,
-    satp: usize,
-}
-
 /// Allocates the stack for a hart, with the given id and returns the end address
 /// of the new stack.
 ///
 /// Returns both, the physical and virtual address to the end of the stack.
 fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (PhysAddr, VirtAddr) {
     // calculate the start address for hart `id`s stack
-    let start = KERNEL_STACK_BASE + (id as usize * KERNEL_STACK_SIZE);
+    let start = KERNEL_STACK_BASE + (id as usize * (KERNEL_STACK_SIZE + PAGE_SIZE));
+    let guard_start = start + KERNEL_STACK_SIZE;
 
     // TODO: map guard pages around the stack
     // allocate the new stack
@@ -58,17 +50,16 @@ fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (PhysAddr, Virt
         )
         .unwrap();
 
+    // map the guard page
+    table
+        .map(0.into(), guard_start.into(), PageSize::Kilopage, Perm::EXEC)
+        .unwrap();
+
     // get the physical and virtual address
     let vaddr = start + KERNEL_STACK_SIZE;
     let paddr: usize = table.translate(start.into()).unwrap().0.into();
 
     (PhysAddr::from(paddr + KERNEL_STACK_SIZE), vaddr.into())
-}
-
-/// Free a kernel stack that was previously allocated using
-/// the method above.
-unsafe fn free_kernel_stack(table: &mut page::sv39::Table, vaddr: VirtAddr) {
-    table.free(vaddr, KERNEL_STACK_SIZE / PAGE_SIZE).unwrap();
 }
 
 /// The code that sets up memory stuff,
@@ -216,56 +207,7 @@ unsafe extern "C" fn entry_trampoline(
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`.
 ///
 /// This function also brings up the other harts.
-unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp: usize) -> ! {
-    // get access to the global page table, because we need it to map
-    // the stack for every hart
-    let mut table = page::root();
-
-    // we use our own hart ids instead of the ones from OpenSBI
-    let mut id = 1;
-
-    // loop through a fixed number of hart ids and try to start them.
-    for sbi_id in 0..HART_COUNT {
-        // we don't want to boot ourself
-        if sbi_id == hart_id {
-            continue;
-        }
-
-        log::debug!("{} hart {}...", "Starting".magenta(), sbi_id);
-
-        // get a new stack for the hart
-        let (phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, id as u64);
-
-        // construct the arguments and store them onto the new stack
-        let args = HartArgs {
-            id,
-            stack: virt_stack.as_ptr(),
-            satp,
-        };
-        let args_ptr = usize::from(phys_stack) - mem::size_of::<HartArgs>();
-        page::phys2virt(args_ptr).as_ptr::<HartArgs>().write(args);
-
-        // try to start the hart
-        match sbi::hsm::start(sbi_id, hart_entry as usize, phys_stack.into()) {
-            // hart successfully started
-            Ok(()) => id += 1,
-            // OpenSBIs hart ids are in order so after one invalid id,
-            // we can abort
-            Err(sbi::Error::InvalidParam) => {
-                // free the stack
-                free_kernel_stack(&mut *table, virt_stack);
-
-                break;
-            }
-            // `sbi_id` is the booting hart
-            Err(sbi::Error::AlreadyAvailable) => {}
-            Err(err) => log::warn!("{} to start hart {}: {:?}", "Failed".yellow(), sbi_id, err),
-        }
-    }
-
-    // explicitly drop the guard, since this method never returns
-    drop(table);
-
+unsafe extern "C" fn rust_trampoline(_hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
     // initialize hart local storage and hart context
     hart::init_hart_context(0).unwrap();
     log::info!(
@@ -275,19 +217,10 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>, satp:
     );
 
     crate::main(fdt);
-    loop {}
-    //sbi::system::shutdown()
-}
 
-/// Raw entrypoint for new harts that are started by the booting hart.
-#[naked]
-unsafe extern "C" fn hart_entry(_hart_id: usize, _stack: usize) -> ! {
-    asm!(
-        "
-    2: j 2b
-    ",
-        options(noreturn)
-    )
+    loop {
+        riscv::asm::wfi();
+    }
 }
 
 /// The entrypoint for the whole kernel.
