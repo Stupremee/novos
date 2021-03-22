@@ -36,15 +36,16 @@ use devicetree::DeviceTree;
 pub fn main(_fdt: &DeviceTree<'_>) {
     log::info!("{}", pmem::alloc_stats());
 
-    for i in 0..10 {
-        log::info!("start {}", i);
-        let mut x = Vec::<u8>::with_capacity(9 * 1024 * 1024);
-        let mut y = Vec::<u8>::with_capacity(16 * 1024);
+    for i in 0..100 {
+        let start = riscv::asm::time();
 
-        x.push(i);
-        assert!(x[0] == i);
-        y.push(i + 1);
-        assert!(y[0] == i + 1);
+        let mut v = Vec::with_capacity((1 * unit::GIB) / 4);
+        v.push(i);
+        assert_eq!(v[0], i);
+        drop(v);
+
+        let end = riscv::asm::time();
+        log::info!("elapsed {:?}", end - start);
     }
 
     log::info!("{}", pmem::alloc_stats());

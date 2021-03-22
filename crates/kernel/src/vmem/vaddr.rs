@@ -1,6 +1,6 @@
 use crate::allocator::PAGE_SIZE;
 use crate::boot::KERNEL_VMEM_ALLOC_BASE;
-use crate::page::VirtAddr;
+use crate::page::{PageSize, VirtAddr};
 use crate::pmem::{self, PhysicalAllocator};
 use alloc::vec::Vec;
 use riscv::sync::{Mutex, MutexGuard};
@@ -8,11 +8,14 @@ use riscv::sync::{Mutex, MutexGuard};
 /// Indicating that an entry inside the bitmap is completely filled.
 const FULL_ENTRY: u64 = u64::MAX;
 
+/// The size of the memory region a single bit specifies.
+const BIT_SIZE: usize = PageSize::Megapage.size();
+
 static VADDR_ALLOC: Mutex<VirtualAddressAllocator> =
     Mutex::new(VirtualAddressAllocator::new(KERNEL_VMEM_ALLOC_BASE));
 
 /// An "allocator" that is responsible for giving out virtual addresses
-/// that can be used
+/// that can be used. The allocator operates on 2 MiB large megapages.
 pub struct VirtualAddressAllocator {
     // the bitmap stores a bit for each page, indicating if it's used or free.
     // there must be a bit for every page until `head`
@@ -30,9 +33,9 @@ impl VirtualAddressAllocator {
         }
     }
 
-    /// Allocate a new virtaddr, that is aligned to the page size
-    /// and is able to hold `n` pages.
-    pub fn next_vaddr_4k(&mut self, n: usize) -> VirtAddr {
+    /// Allocate a new virtaddr, that is aligned to the mega page size
+    /// and is able to hold `n` mega pages.
+    pub fn next_vaddr(&mut self, n: usize) -> VirtAddr {
         assert_ne!(n, 0, "requested to alloc 0 vaddrs");
 
         // if we request more than 64 pages, we will not check for single bits,
@@ -55,7 +58,7 @@ impl VirtualAddressAllocator {
                     .for_each(|entry| *entry = FULL_ENTRY);
 
                 // return the address
-                let addr = self.start + (idx * (64 * PAGE_SIZE));
+                let addr = self.start + (idx * (64 * BIT_SIZE));
                 return addr.into();
             }
 
@@ -63,7 +66,7 @@ impl VirtualAddressAllocator {
             // and try again
             let bitmap = self.bitmap();
             bitmap.resize(bitmap.len() * 2, 0);
-            return self.next_vaddr_4k(n);
+            return self.next_vaddr(n);
         }
 
         // get a mask, that can check for `n` pages that are free
@@ -89,7 +92,7 @@ impl VirtualAddressAllocator {
             // and return the address
             *entry |= mask << bit;
 
-            let addr = self.start + (idx * (64 * PAGE_SIZE)) + (bit * PAGE_SIZE);
+            let addr = self.start + (idx * (64 * BIT_SIZE)) + (bit * BIT_SIZE);
             return addr.into();
         }
 
@@ -97,11 +100,11 @@ impl VirtualAddressAllocator {
         // and try again
         let bitmap = self.bitmap();
         bitmap.resize(bitmap.len() * 2, 0);
-        self.next_vaddr_4k(n)
+        self.next_vaddr(n)
     }
 
     /// Mark the given virtual address, that was previously allocated with `n` pages, as free.
-    pub unsafe fn free_vaddr_4k(&mut self, addr: VirtAddr, n: usize) {
+    pub unsafe fn free_vaddr(&mut self, addr: VirtAddr, n: usize) {
         assert_ne!(n, 0, "requested to free 0 vaddrs");
 
         let addr = usize::from(addr);
@@ -110,7 +113,7 @@ impl VirtualAddressAllocator {
         if n >= 64 {
             // get the index of the entry, `addr` is marked by, and the number
             // of entries that were allocated
-            let entry = (addr - self.start) / (64 * PAGE_SIZE);
+            let entry = (addr - self.start) / (64 * BIT_SIZE);
             let num_entries = (n + 63) / 64;
 
             // mark the entries as free
@@ -121,9 +124,14 @@ impl VirtualAddressAllocator {
             return;
         }
 
-        // at the moment, we will never hit this branch, but it would be cool to support
-        // it at some point in the future
-        unimplemented!()
+        // get the entry and bit that is responsible for `addr`
+        let entry = (addr - self.start) / (64 * BIT_SIZE);
+        let bit = ((addr - self.start) / BIT_SIZE) % 64;
+        let mask = !((1 << bit) - 1) as u64;
+
+        // mark the pages as free
+        let entry = &mut self.bitmap()[entry];
+        *entry &= mask;
     }
 
     #[inline]

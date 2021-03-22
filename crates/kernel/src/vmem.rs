@@ -6,7 +6,7 @@ use crate::allocator::slab::SlabPool;
 use crate::page::{PageSize, PageTable, Perm};
 use crate::{
     allocator::{self, buddy::MAX_ORDER, slab, PAGE_SIZE},
-    page,
+    page, unit,
 };
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
@@ -44,14 +44,15 @@ impl FreeList {
         if self.head.is_none() {
             // get the size of each page inside this freelist
             let size = allocator::size_for_order(self.order);
+            let size = size.max(2 * unit::MIB);
 
             // get a new vaddr and allocate the new memory
-            let vaddr = vaddr::global().next_vaddr_4k(size / PAGE_SIZE);
+            let vaddr = vaddr::global().next_vaddr(size / PageSize::Megapage.size());
             page::root()
                 .map_alloc(
                     vaddr,
-                    size / PAGE_SIZE,
-                    PageSize::Kilopage,
+                    size / PageSize::Megapage.size(),
+                    PageSize::Megapage,
                     Perm::READ | Perm::WRITE,
                 )
                 .map_err(Error::Page)?;
@@ -143,13 +144,14 @@ impl VirtualAllocator {
 
         // last step, if there's no free lsit for the requested size, manually allocate
         // the memory required for the allocation
-        let size = allocator::align_up(layout.size(), PAGE_SIZE);
-        let vaddr = vaddr::global().next_vaddr_4k(size / PAGE_SIZE);
+        let size = allocator::align_up(layout.size(), PageSize::Megapage.size());
+        let vaddr = vaddr::global().next_vaddr(size / PageSize::Megapage.size());
+
         page::root()
             .map_alloc(
                 vaddr,
-                size / PAGE_SIZE,
-                PageSize::Kilopage,
+                size / PageSize::Megapage.size(),
+                PageSize::Megapage,
                 Perm::READ | Perm::WRITE,
             )
             .map_err(Error::Page)?;
@@ -184,13 +186,13 @@ impl VirtualAllocator {
         }
 
         // last step, if there's no free lsit for the requested size, manually free the memory
-        let size = allocator::align_up(layout.size(), PAGE_SIZE);
+        let size = allocator::align_up(layout.size(), PageSize::Megapage.size());
         page::root()
-            .free(ptr.as_ptr().into(), size / PAGE_SIZE)
+            .free(ptr.as_ptr().into(), size / PageSize::Megapage.size())
             .map_err(Error::Page)?;
 
         // tell the vaddr allocator that the address is free to use again
-        vaddr::global().free_vaddr_4k(ptr.as_ptr().into(), size / PAGE_SIZE);
+        vaddr::global().free_vaddr(ptr.as_ptr().into(), size / PageSize::Megapage.size());
 
         // successfully freed memory
         Ok(())

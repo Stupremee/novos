@@ -54,7 +54,7 @@ pub trait PageTable {
         // the order that will be used for the buddy allocator for ech page size
         let order = match page_size {
             PageSize::Kilopage => 0,
-            PageSize::Megapage => 8,
+            PageSize::Megapage => 9,
             PageSize::Gigapage => unimplemented!(),
         };
 
@@ -84,7 +84,7 @@ pub trait PageTable {
         // the order that will be used for the buddy allocator for freeing the pages
         let order = match page_size {
             PageSize::Kilopage => 0,
-            PageSize::Megapage => 8,
+            PageSize::Megapage => 9,
             PageSize::Gigapage => unimplemented!(),
         };
 

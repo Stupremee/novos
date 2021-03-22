@@ -68,14 +68,14 @@ impl PageSize {
     /// Check if a given address is aligned to the boundary of this page size.
     pub fn is_aligned(self, addr: usize) -> bool {
         let align = self.size();
-        addr & (align - 1) == 0
+        addr % align == 0
     }
 
     /// Return the number of bytes this page size covers.
     ///
     /// This will return the sizes for the Sv39 addressing mode.
     #[allow(clippy::identity_op)]
-    pub fn size(self) -> usize {
+    pub const fn size(self) -> usize {
         match self {
             PageSize::Kilopage => 4 * unit::KIB,
             PageSize::Megapage => 2 * unit::MIB,
