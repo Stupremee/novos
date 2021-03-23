@@ -273,10 +273,21 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
 unsafe extern "C" fn hart_entry(_hart_id: usize, _virt_stack: usize) -> ! {
     asm!(
         "
+            // Load global pointer
+            la t0, __global_pointer$
+            li t1, {}
+            sub t0, t0, t1
+
+        .option push
+        .option norelax
+            mv gp, t0
+        .option pop
+
+
             mv sp, a1
 
             // Enable paging
-            lla t0, {}
+            la t0, {}
             srli t0, t0, 12
 
             li t1, 8
@@ -288,7 +299,7 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _virt_stack: usize) -> ! {
 
             // Jump to rust code
             j {}
-         ", sym PAGE_TABLE, sym rust_hart_entry,
+         ", const KERNEL_PHYS_MEM_BASE, sym PAGE_TABLE, sym rust_hart_entry,
         options(noreturn)
     )
 }
