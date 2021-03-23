@@ -1,10 +1,11 @@
+use crate::hart;
 use core::panic::PanicInfo;
 
 #[panic_handler]
 fn panic_handler(info: &PanicInfo<'_>) -> ! {
-    log::error!("============");
-    log::error!("KERNEL PANIC");
-    log::error!("============");
+    log::error!("=========================");
+    log::error!("KERNEL PANIC ON HART {:3}", hart::current().id());
+    log::error!("=========================");
 
     match (info.location(), info.message()) {
         (Some(loc), Some(msg)) => {
@@ -19,7 +20,13 @@ fn panic_handler(info: &PanicInfo<'_>) -> ! {
         (None, None) => log::error!("no information available."),
     }
 
-    sbi::system::fail_shutdown();
+    if hart::current().is_bsp() {
+        sbi::system::fail_shutdown();
+    } else {
+        loop {
+            riscv::asm::wfi()
+        }
+    }
 }
 
 #[alloc_error_handler]

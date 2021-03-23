@@ -144,7 +144,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
 
     // allocate the stack for this hart
-    let (_, stack) = alloc_kernel_stack(table, 0);
+    let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
 
     // map the whole MMIO space (<0x8000_0000)
     for addr in (0..0x8000_0000).step_by(unit::GIB) {
@@ -166,8 +166,20 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     });
     riscv::asm::sfence(None, None);
 
+    // we need to convert the devicetree to use virtual memory
+    let fdt = DeviceTree::from_ptr(page::phys2virt(fdt.as_ptr()).as_ptr()).unwrap();
+
+    let gp: usize;
+    asm!("mv {}, gp", out(reg) gp);
+
     // jump to rust code using the trampoline
-    entry_trampoline(hart_id, &fdt, stack.into(), rust_trampoline as usize)
+    entry_trampoline(
+        hart_id,
+        page::phys2virt(&fdt as *const _).as_ptr(),
+        stack.into(),
+        rust_trampoline as usize,
+        page::phys2virt(gp).into(),
+    )
 }
 
 /// Trampoline to jump enable paging and transition to new stack.
@@ -177,9 +189,12 @@ unsafe extern "C" fn entry_trampoline(
     _fdt: *const DeviceTree<'_>,
     _new_stack: usize,
     _dst: usize,
+    _gp: usize,
 ) -> ! {
     #[rustfmt::skip]
     asm!("
+        mv gp, a4
+
         mv t0, sp
         mv sp, a2
         mv t1, a2
@@ -207,16 +222,88 @@ unsafe extern "C" fn entry_trampoline(
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`.
 ///
 /// This function also brings up the other harts.
-unsafe extern "C" fn rust_trampoline(_hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
+unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
     // initialize hart local storage and hart context
-    hart::init_hart_context(0).unwrap();
+    hart::init_hart_context(hart_id as u64, true).unwrap();
     log::info!(
         "{} with id {} online.",
         "Hart".green(),
         hart::current().id()
     );
 
+    let mut table = page::root();
+
+    // bring up all other harts
+    for cpu in fdt
+        .cpus()
+        .children()
+        .filter(|node| node.name().starts_with("cpu@"))
+    {
+        // get the id for the hart
+        let id = cpu.prop("reg").unwrap().as_u32().unwrap();
+
+        // skip ourself
+        if hart_id == id as usize {
+            continue;
+        }
+
+        // allocate the stack for the new hart
+        let (_phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, id.into());
+
+        match sbi::hsm::start(id as usize, hart_entry as usize, virt_stack.into()) {
+            Ok(()) => {}
+            Err(err) => {
+                log::warn!("{} to start hart {}: {:?}", "Failed".yellow(), id, err);
+            }
+        }
+    }
+
+    // explicitly drop, otherwise the table lock would never be dropped
+    drop(table);
+
     crate::main(fdt);
+
+    loop {
+        riscv::asm::wfi();
+    }
+}
+
+/// The entrypoint for the other harts.
+#[naked]
+unsafe extern "C" fn hart_entry(_hart_id: usize, _virt_stack: usize) -> ! {
+    asm!(
+        "
+            mv sp, a1
+
+            // Enable paging
+            lla t0, {}
+            srli t0, t0, 12
+
+            li t1, 8
+            slli t1, t1, 60
+            or t0, t1, t0
+
+            csrw satp, t0
+            sfence.vma
+
+            // Jump to rust code
+            j {}
+         ", sym PAGE_TABLE, sym rust_hart_entry,
+        options(noreturn)
+    )
+}
+
+/// The rust entry point for each additional hart.
+unsafe extern "C" fn rust_hart_entry(hart_id: usize) -> ! {
+    // install the interrupt handler
+    interrupt::install_handler();
+
+    // init hart local context
+    hart::init_hart_context(hart_id as u64, false).unwrap();
+
+    log::info!("{} with ID {} online", "Hart".green(), hart::current().id());
+
+    crate::hmain();
 
     loop {
         riscv::asm::wfi();

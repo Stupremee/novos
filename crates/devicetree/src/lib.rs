@@ -103,6 +103,12 @@ impl<'tree> DeviceTree<'tree> {
             .expect("there must be a `/memory` node")
     }
 
+    /// Return the `/cpus` node.
+    pub fn cpus(&'tree self) -> Node<'tree> {
+        self.find_node("/cpus")
+            .expect("there must be a `/cpus` node")
+    }
+
     /// Returns the `/chosen` node of this device tree.
     pub fn chosen(&'tree self) -> node::ChosenNode<'tree> {
         node::ChosenNode {

@@ -21,16 +21,21 @@ pub struct HartContext {
     trap_stack: NonNull<u8>,
     /// Location to temporarily store the stack pointer inside the interrupt handler.
     temp_sp: usize,
+    /// Bool indicating if this hart was the booting hart.
+    is_bsp: bool,
 }
 
 impl HartContext {
     /// Return the id of this hart.
-    ///
-    /// This is our own generated id and thus not compatible
-    /// with the hart id given by opensbi.
     #[inline]
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Return if this hart was the booting hart.
+    #[inline]
+    pub fn is_bsp(&self) -> bool {
+        self.is_bsp
     }
 }
 
@@ -46,7 +51,7 @@ pub fn current() -> &'static HartContext {
 
 /// Initializes the context for this hart by allocating memory and then saving
 /// the pointer inside the `sscratch` CSR.
-pub unsafe fn init_hart_context(hart_id: u64) -> Result<(), allocator::Error> {
+pub unsafe fn init_hart_context(hart_id: u64, is_bsp: bool) -> Result<(), allocator::Error> {
     // allocate the trap stack
     let mut stack = ManuallyDrop::new(vec![0u8; TRAP_STACK_SIZE]);
 
@@ -55,6 +60,7 @@ pub unsafe fn init_hart_context(hart_id: u64) -> Result<(), allocator::Error> {
         id: hart_id,
         trap_stack: NonNull::new(stack.as_mut_ptr().add(TRAP_STACK_SIZE)).unwrap(),
         temp_sp: 0,
+        is_bsp,
     };
 
     // box up the context so it's stored on the heap
