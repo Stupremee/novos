@@ -1,10 +1,12 @@
 //! Hart local storage and context.
 
+use crate::drivers::DeviceManager;
 use crate::{allocator, unit};
 use alloc::boxed::Box;
 use alloc::vec;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
+use riscv::sync::{Mutex, MutexGuard};
 
 /// The size of each trap stack.
 pub const TRAP_STACK_SIZE: usize = 4 * unit::KIB;
@@ -23,6 +25,7 @@ pub struct HartContext {
     temp_sp: usize,
     /// Bool indicating if this hart was the booting hart.
     is_bsp: bool,
+    devices: &'static Mutex<DeviceManager>,
 }
 
 impl HartContext {
@@ -36,6 +39,12 @@ impl HartContext {
     #[inline]
     pub fn is_bsp(&self) -> bool {
         self.is_bsp
+    }
+
+    /// Get exclusive access to the global device manager.
+    #[inline]
+    pub fn devices(&self) -> MutexGuard<'static, DeviceManager> {
+        self.devices.lock()
     }
 }
 
@@ -51,7 +60,11 @@ pub fn current() -> &'static HartContext {
 
 /// Initializes the context for this hart by allocating memory and then saving
 /// the pointer inside the `sscratch` CSR.
-pub unsafe fn init_hart_context(hart_id: u64, is_bsp: bool) -> Result<(), allocator::Error> {
+pub unsafe fn init_hart_context(
+    hart_id: u64,
+    is_bsp: bool,
+    devices: &'static Mutex<DeviceManager>,
+) -> Result<(), allocator::Error> {
     // allocate the trap stack
     let mut stack = ManuallyDrop::new(vec![0u8; TRAP_STACK_SIZE]);
 
@@ -61,6 +74,7 @@ pub unsafe fn init_hart_context(hart_id: u64, is_bsp: bool) -> Result<(), alloca
         trap_stack: NonNull::new(stack.as_mut_ptr().add(TRAP_STACK_SIZE)).unwrap(),
         temp_sp: 0,
         is_bsp,
+        devices,
     };
 
     // box up the context so it's stored on the heap

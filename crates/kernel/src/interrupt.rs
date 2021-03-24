@@ -1,5 +1,6 @@
 //! Interrupt handler
 
+use crate::hart;
 use riscv::trap::Trap;
 
 /// Installs the global trap handler by writing it's address
@@ -14,23 +15,37 @@ pub fn install_handler() {
 /// The returned value will be the new `sepc` value.
 pub extern "C" fn interrupt_handler(
     _frame: &mut TrapFrame,
-    cause: usize,
-    tval: usize,
-    epc: usize,
+    scause: usize,
+    stval: usize,
+    sepc: usize,
 ) -> usize {
-    let cause = Trap::from_cause(cause);
-
-    match cause {
-        Some(trap) => panic!(
-            "Unhandled trap: {:?} pc: {:#x?} tval: {:#x?}",
-            trap, epc, tval
-        ),
-
+    let cause = match Trap::from_cause(scause) {
+        Some(x) => x,
         None => panic!(
-            "Invalid trap cause: {:#x?} pc: {:#x?} tval: {:#x?}",
-            cause, epc, tval
+            "Invalid trap cause: {:x?} pc: {:#x?} tval: {:#x?}",
+            scause, sepc, stval
         ),
     };
+
+    match cause {
+        Trap::SupervisorExternalInterrupt => {
+            log::debug!("got external interrupt");
+
+            if let Some(claim) = hart::current()
+                .devices()
+                .plic()
+                .claim(hart::current().id() as usize)
+            {
+                claim.finish();
+            }
+        }
+        trap => panic!(
+            "Unhandled trap: {:?} pc: {:#x?} tval: {:#x?}",
+            trap, sepc, stval
+        ),
+    };
+
+    sepc
 }
 
 /// The global trap handler that will save the registers and then

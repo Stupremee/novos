@@ -32,12 +32,17 @@ pub use static_cell::StaticCell;
 use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
-pub fn main(fdt: &DeviceTree<'_>) {
-    // initialize all device drivers
-    let mut devices = drivers::DeviceManager::from_devicetree(fdt);
-    devices.init();
+pub fn main(_fdt: &DeviceTree<'_>) {
+    unsafe {
+        asm!("csrsi sstatus, 2");
+        asm!("li t0, 512", "csrs sie, t0", out("t0") _);
+    }
+    let mut plic = hart::current().devices();
+    let plic = plic.plic();
 
-    sbi::system::shutdown();
+    plic.enable(hart::current().id() as usize, 0x0A);
+
+    //sbi::system::shutdown();
 }
 
 /// The entry point for each new hart that is not the boot hart.

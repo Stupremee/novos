@@ -44,9 +44,14 @@ pub trait DeviceDriver {
 
     /// Initializes this device driver.
     fn init(&mut self);
+
+    /// Try to convert this device into a PLIC.
+    fn as_plic(&mut self) -> Option<&mut plic::Controller> {
+        None
+    }
 }
 
-declare_drivers![plic::Device];
+declare_drivers![plic::Controller];
 
 /// Manages multiples device drivers.
 pub struct DeviceManager {
@@ -100,7 +105,16 @@ impl DeviceManager {
     }
 
     /// Initalize all devices inside this device manager.
-    pub fn init(&mut self) {
+    pub unsafe fn init(&mut self) {
         self.devices.iter_mut().for_each(|dev| dev.init())
+    }
+
+    /// Try to find a PLIC inside this device manager.
+    pub fn plic(&mut self) -> &mut plic::Controller {
+        self.devices
+            .iter_mut()
+            .filter_map(|dev| dev.as_plic())
+            .next()
+            .expect("PLIC not found")
     }
 }

@@ -3,13 +3,14 @@
 use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
 use crate::drivers::{ns16550a, DeviceDriver};
 use crate::{
-    hart, interrupt,
+    drivers, hart, interrupt,
     page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
     pmem, unit, StaticCell,
 };
+use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
-use riscv::{csr::satp, symbols};
+use riscv::{csr::satp, symbols, sync::Mutex};
 
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
@@ -100,9 +101,6 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     } else {
         None
     };
-
-    // install the interrupt handler
-    interrupt::install_handler();
 
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
@@ -234,13 +232,17 @@ unsafe extern "C" fn entry_trampoline(
 ///
 /// This function also brings up the other harts.
 unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
+    // install the interrupt handler
+    interrupt::install_handler();
+
+    // initialize all device drivers
+    let mut devices = drivers::DeviceManager::from_devicetree(fdt);
+    devices.init();
+    let devices = Box::leak(Box::new(Mutex::new(devices)));
+
     // initialize hart local storage and hart context
-    hart::init_hart_context(hart_id as u64, true).unwrap();
-    log::info!(
-        "{} with id {} online.",
-        "Hart".green(),
-        hart::current().id()
-    );
+    hart::init_hart_context(hart_id as u64, true, devices).unwrap();
+    log::info!("{} with id {} online", "Hart".green(), hart::current().id());
 
     let mut table = page::root();
 
@@ -260,6 +262,12 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
 
         // allocate the stack for the new hart
         let (_phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, id.into());
+
+        // we need to pass the device manager to the new hart
+        virt_stack
+            .as_ptr::<usize>()
+            .offset(-1)
+            .write_volatile(devices as *const _ as usize);
 
         match sbi::hsm::start(id as usize, hart_entry as usize, virt_stack.into()) {
             Ok(()) => {}
@@ -307,6 +315,8 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _virt_stack: usize) -> ! {
             csrw satp, t0
             sfence.vma
 
+            ld a1, -8(sp)
+
             // Jump to rust code
             j {}
          ", const KERNEL_PHYS_MEM_BASE, sym PAGE_TABLE, sym rust_hart_entry,
@@ -315,14 +325,17 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _virt_stack: usize) -> ! {
 }
 
 /// The rust entry point for each additional hart.
-unsafe extern "C" fn rust_hart_entry(hart_id: usize) -> ! {
+unsafe extern "C" fn rust_hart_entry(
+    hart_id: usize,
+    devices: &'static Mutex<drivers::DeviceManager>,
+) -> ! {
     // install the interrupt handler
     interrupt::install_handler();
 
     // init hart local context
-    hart::init_hart_context(hart_id as u64, false).unwrap();
+    hart::init_hart_context(hart_id as u64, false, devices).unwrap();
 
-    log::info!("{} with ID {} online", "Hart".green(), hart::current().id());
+    log::info!("{} with ID {} online", "Hart".green(), hart::current().id(),);
 
     crate::hmain();
 
