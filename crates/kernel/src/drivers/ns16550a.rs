@@ -1,7 +1,7 @@
 //! Driver for the NS16550a UART Chip.
 
 use core::{fmt, ptr::NonNull};
-use devicetree::node::ChosenNode;
+use devicetree::node::Node;
 
 pub struct Device {
     base: NonNull<u8>,
@@ -144,22 +144,20 @@ impl fmt::Write for Device {
     }
 }
 
-impl super::DeviceTreeDriver for Device {
-    const COMPATIBLE: &'static [&'static str] = &["ns16550a", "ns16550"];
+impl super::DeviceDriver for Device {
+    fn compatible_with(node: &Node<'_>) -> bool {
+        node.compatible_with("ns16550a")
+    }
 
-    fn from_chosen(node: ChosenNode<'_>) -> Option<Self> {
-        let stdout = node.stdout()?;
-        let mut compatible = stdout.prop("compatible")?.as_strings();
-
-        if !compatible.any(|x| Self::COMPATIBLE.contains(&x)) {
-            return None;
-        }
-
-        let base = stdout.regions().next()?.start();
-        let mut uart = Device {
+    fn from_node(node: Node<'_>) -> Option<Self> {
+        let base = node.regions().next()?.start();
+        let uart = Device {
             base: NonNull::new(base as *mut _)?,
         };
-        uart.init();
         Some(uart)
+    }
+
+    fn init(&mut self) {
+        Device::init(self)
     }
 }

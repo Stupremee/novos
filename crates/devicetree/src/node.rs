@@ -66,6 +66,15 @@ impl<'tree> Node<'tree> {
             data,
         }
     }
+
+    /// Check if this nodes `compatible` property contains `x`.
+    pub fn compatible_with(&self, x: &str) -> bool {
+        if let Some(prop) = self.prop("compatible") {
+            prop.as_strings().any(|c| c == x)
+        } else {
+            false
+        }
+    }
 }
 
 /// A property of a [`Node`].

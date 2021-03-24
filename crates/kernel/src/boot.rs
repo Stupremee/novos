@@ -1,7 +1,7 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
 use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
-use crate::drivers::{ns16550a, DeviceTreeDriver};
+use crate::drivers::{ns16550a, DeviceDriver};
 use crate::{
     hart, interrupt,
     page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
@@ -69,7 +69,13 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     let fdt = DeviceTree::from_ptr(fdt).unwrap();
 
     // try to find a uart device, and then set it as the global logger
-    if let Some(uart) = ns16550a::Device::from_chosen(fdt.chosen()) {
+    let stdout = fdt.chosen().stdout();
+    if let Some(mut uart) = stdout
+        .filter(|n| ns16550a::Device::compatible_with(n))
+        .and_then(ns16550a::Device::from_node)
+    {
+        uart.init();
+
         match log::init_log(uart) {
             Ok(_) => log::info!(
                 "{} the global logging system using UART.",
