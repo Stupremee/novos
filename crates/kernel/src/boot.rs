@@ -70,9 +70,9 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 
     // try to find a uart device, and then set it as the global logger
     let stdout = fdt.chosen().stdout();
-    if let Some(mut uart) = stdout
+    let uart_node = if let Some((mut uart, uart_node)) = stdout
         .filter(|n| ns16550a::Device::compatible_with(n))
-        .and_then(ns16550a::Device::from_node)
+        .and_then(|node| Some((ns16550a::Device::from_node(&node)?, node)))
     {
         uart.init();
 
@@ -94,14 +94,34 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
                 .unwrap();
                 sbi::system::fail_shutdown();
             }
-        }
-    }
+        };
+
+        Some(uart_node)
+    } else {
+        None
+    };
 
     // install the interrupt handler
     interrupt::install_handler();
 
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
+
+    // get access to the global page table
+    let table = &mut *PAGE_TABLE.get();
+
+    // map the uart mmio space
+    if let Some(reg) = uart_node.and_then(|node| node.regions().next()) {
+        assert!(reg.size() < PAGE_SIZE, "uart mmio space too big");
+        table
+            .map(
+                reg.start().into(),
+                reg.start().into(),
+                PageSize::Kilopage,
+                Perm::READ | Perm::WRITE,
+            )
+            .unwrap();
+    }
 
     // copy the devicetree to a newly allocated physical page
     let fdt_order = order_for_size(fdt.total_size() as usize);
@@ -113,9 +133,6 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 
     let new_fdt = slice::from_raw_parts_mut(new_fdt.as_ptr(), size_for_order(fdt_order));
     let fdt: DeviceTree<'static> = fdt.copy_to_slice(new_fdt);
-
-    // get access to the global page table
-    let table = &mut *PAGE_TABLE.get();
 
     // get all available physical memory from the devicetree and map it
     // at the physmem base
@@ -151,18 +168,6 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 
     // allocate the stack for this hart
     let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
-
-    // map the whole MMIO space (<0x8000_0000)
-    for addr in (0..0x8000_0000).step_by(unit::GIB) {
-        table
-            .map(
-                addr.into(),
-                addr.into(),
-                PageSize::Gigapage,
-                Perm::READ | Perm::WRITE,
-            )
-            .unwrap();
-    }
 
     // enable paging
     satp::write(satp::Satp {
@@ -263,7 +268,6 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
             }
         }
     }
-
     // explicitly drop, otherwise the table lock would never be dropped
     drop(table);
 

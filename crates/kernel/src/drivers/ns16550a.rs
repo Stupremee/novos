@@ -149,7 +149,7 @@ impl super::DeviceDriver for Device {
         node.compatible_with("ns16550a")
     }
 
-    fn from_node(node: Node<'_>) -> Option<Self> {
+    fn from_node(node: &Node<'_>) -> Option<Self> {
         let base = node.regions().next()?.start();
         let uart = Device {
             base: NonNull::new(base as *mut _)?,

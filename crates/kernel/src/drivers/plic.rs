@@ -12,7 +12,7 @@ impl super::DeviceDriver for Device {
         node.compatible_with("riscv,plic0")
     }
 
-    fn from_node(_: Node<'_>) -> Option<Self> {
+    fn from_node(_: &Node<'_>) -> Option<Self> {
         Some(Self {
             _base: NonNull::dangling(),
         })
