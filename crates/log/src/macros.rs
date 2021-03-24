@@ -13,6 +13,10 @@ macro_rules! debug {
 /// Log an info message.
 #[macro_export]
 macro_rules! info {
+    (guard = $guard:expr; $($args:tt)+) => {
+        $crate::log!(guard = $guard; Info, $($args)+);
+    };
+
     ($($args:tt)+) => {
         $crate::log!(Info, $($args)+);
     };
@@ -21,6 +25,10 @@ macro_rules! info {
 /// Log a warn message.
 #[macro_export]
 macro_rules! warn {
+    (guard = $guard:expr; $($args:tt)+) => {
+        $crate::log!(guard = $guard; Warn, $($args)+);
+    };
+
     ($($args:tt)+) => {
         $crate::log!(Warn, $($args)+);
     };
@@ -29,6 +37,10 @@ macro_rules! warn {
 /// Log an error message.
 #[macro_export]
 macro_rules! error {
+    (guard = $guard:expr; $($args:tt)+) => {
+        $crate::log!(guard = $guard; Error, $($args)+);
+    };
+
     ($($args:tt)+) => {
         $crate::log!(Error, $($args)+);
     };
@@ -37,9 +49,14 @@ macro_rules! error {
 /// The stadnard logging macro.
 #[macro_export]
 macro_rules! log {
-    ($level:ident, $($args:tt)+) => {{
+    (guard = $guard:expr; $level:ident, $($args:tt)+) => {{
         #[allow(unused_imports)]
         use $crate::__export::owo_colors::OwoColorize;
-        $crate::log::<$crate::$level>(::core::module_path!(), ::core::format_args!($($args)*));
+        $crate::log::<$crate::$level>($guard, ::core::module_path!(), ::core::format_args!($($args)*));
+    }};
+
+    ($level:ident, $($args:tt)+) => {{
+        let mut _guard = $crate::global_log();
+        $crate::log!(guard = &mut _guard; $level, $($args)+);
     }};
 }

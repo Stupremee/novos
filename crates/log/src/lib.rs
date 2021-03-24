@@ -15,7 +15,7 @@ use core::marker::PhantomData;
 use core::time::Duration;
 use owo_colors::{colors, Color, OwoColorize};
 
-use riscv::sync::Mutex;
+use riscv::sync::{Mutex, MutexGuard};
 
 const LOGGER_SIZE: usize = 8;
 static LOG: GlobalLogger = GlobalLogger(Mutex::new(None));
@@ -116,17 +116,29 @@ impl<L: Level> fmt::Write for LogWriter<'_, L> {
 }
 
 #[doc(hidden)]
-pub fn log<L: Level>(module: &str, args: fmt::Arguments<'_>) {
-    if let Some(log) = &mut *LOG.0.lock() {
+pub fn log<L: Level>(mut _guard: &mut LogGuard, module: &str, args: fmt::Arguments<'_>) {
+    if let Some(_guard) = &mut *_guard.guard {
         let mut writer = LogWriter {
             time: riscv::asm::time(),
             prefix: true,
             module,
-            _guard: &mut **log,
+            _guard: &mut **_guard,
             _level: PhantomData::<L>,
         };
 
         writeln!(writer, "{}", args).expect("failed to log message");
+    }
+}
+
+/// A guard providing exclusive access to the global logger.
+pub struct LogGuard {
+    guard: MutexGuard<'static, Option<Value<dyn Write, { LOGGER_SIZE }>>>,
+}
+
+/// Return a mutex protected reference to the global logger.
+pub fn global_log() -> LogGuard {
+    LogGuard {
+        guard: LOG.0.lock(),
     }
 }
 
