@@ -2,7 +2,7 @@
 
 use core::marker::PhantomData;
 use devicetree::node::Node;
-use voladdress::{VolAddress, VolBlock, VolSeries};
+use voladdress::{Safe, VolAddress, VolBlock, VolSeries};
 
 /// The number of contexts available.
 const CONTEXT_COUNT: usize = 15872;
@@ -14,11 +14,11 @@ pub struct Controller {
     /// The maximum number of interrupts available.
     max_interrupts: usize,
     /// The priorities for each interrupt source.
-    priorities: VolBlock<u32, 1024>,
+    priorities: VolBlock<u32, Safe, Safe, 1024>,
     /// Enable / Disable global interrupts for each context.
-    enable: VolBlock<u32, { CONTEXT_COUNT * 32 }>,
+    enable: VolBlock<u32, Safe, Safe, { CONTEXT_COUNT * 32 }>,
     /// The threshold values and claim bits
-    threshold_claim: VolSeries<[u32; 2], CONTEXT_COUNT, 4096>,
+    threshold_claim: VolSeries<u32, Safe, Safe, CONTEXT_COUNT, 4096>,
 }
 
 impl Controller {
@@ -51,7 +51,7 @@ impl Controller {
     /// Claim an interrupt, if it's pending, and return a guard that can be used
     /// to finish the interrupt.
     pub fn claim(&mut self, ctx: usize) -> Option<ClaimGuard<'_>> {
-        let claim = unsafe { self.threshold_claim.index(ctx).cast::<u32>().offset(1) };
+        let claim = unsafe { self.threshold_claim.index(ctx).add(1) };
 
         match claim.read() {
             0 => None,
@@ -61,6 +61,12 @@ impl Controller {
                 _lifetime: PhantomData,
             }),
         }
+    }
+
+    /// Set the threshold for the given context.
+    pub fn set_threshold(&mut self, ctx: usize, threshold: u32) {
+        let addr = self.threshold_claim.index(ctx);
+        addr.write(threshold);
     }
 
     /// Set the priority of the interrupt with `id`.
@@ -115,11 +121,16 @@ pub struct ClaimGuard<'plic> {
     /// The interrupt id
     id: u32,
     /// Address to the claim register for finsishing this interrupt.
-    claim: VolAddress<u32>,
+    claim: VolAddress<u32, Safe, Safe>,
     _lifetime: PhantomData<&'plic ()>,
 }
 
 impl ClaimGuard<'_> {
+    /// Return the id of this interrupt claim.
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
     /// Finish this interrupt.
     pub fn finish(self) {
         self.claim.write(self.id);
