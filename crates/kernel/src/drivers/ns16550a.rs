@@ -8,6 +8,10 @@ pub struct Device {
 }
 
 impl Device {
+    pub unsafe fn new(base: NonNull<u8>) -> Self {
+        Self { base }
+    }
+
     /// Initialize this UART driver.
     pub fn init(&mut self) {
         let ptr = self.base.as_ptr();
@@ -24,9 +28,9 @@ impl Device {
             lcr.write_volatile(lcr_value);
 
             // Enable received data available interrupt,
-            // by writing `1` into the IERT register.
-            let iert = ptr.offset(1);
-            iert.write_volatile(0x01);
+            // by writing `1` into the IER register.
+            let ier = ptr.offset(1);
+            ier.write_volatile(0x01);
 
             // "Calculating" the divisor required for the baud rate.
             let divisor = 592u16;

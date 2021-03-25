@@ -35,12 +35,16 @@ use devicetree::DeviceTree;
 pub fn main(_fdt: &DeviceTree<'_>) {
     unsafe {
         asm!("csrsi sstatus, 2");
-        asm!("li t0, 512", "csrs sie, t0", out("t0") _);
+        asm!("li t0, 1 << 9", "csrs sie, t0", out("t0") _);
+        //riscv::csr::sie::write(1 << 9);
     }
+
     let mut plic = hart::current().devices();
     let plic = plic.plic();
 
-    plic.enable(hart::current().id() as usize, 0x0A);
+    plic.enable(1, 0xA);
+    plic.set_threshold(1, 0);
+    plic.set_priority(0xA, 1);
 
     //sbi::system::shutdown();
 }
