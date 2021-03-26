@@ -226,6 +226,11 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
     hart::init_hart_context(hart_id as u64, true, devices).unwrap();
     log::info!("{} with id {} online", "Hart".green(), hart::current().id());
 
+    // switch to the new logger
+    if log::init_log(drivers::GlobalLog).is_err() {
+        panic!("Failed to switch to new global logger");
+    }
+
     let mut table = page::root();
 
     // bring up all other harts

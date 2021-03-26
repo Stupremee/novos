@@ -1,7 +1,9 @@
 pub mod ns16550a;
 pub mod plic;
 
+use crate::hart;
 use crate::page::{self, PageSize, PageTable, Perm};
+use core::fmt;
 use devicetree::{node::Node, DeviceTree};
 use riscv::sync::{Mutex, MutexGuard};
 
@@ -118,5 +120,25 @@ impl DeviceManager {
     /// Get exclusive access to the UART driver.
     pub fn uart(&self) -> MutexGuard<'_, Option<ns16550a::Device>> {
         self.uart.lock()
+    }
+}
+
+/// A global logger that uses the hart local context to access the UART port.
+pub struct GlobalLog;
+
+impl fmt::Write for GlobalLog {
+    fn write_str(&mut self, x: &str) -> fmt::Result {
+        let devices = hart::current().devices();
+        if let Some(uart) = &mut *devices.uart() {
+            uart.write_str(x)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl log::Logger for GlobalLog {
+    fn hart_id(&self) -> Option<usize> {
+        Some(hart::current().id() as usize)
     }
 }

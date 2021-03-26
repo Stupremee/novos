@@ -148,6 +148,12 @@ impl fmt::Write for Device {
     }
 }
 
+impl log::Logger for Device {
+    fn hart_id(&self) -> Option<usize> {
+        None
+    }
+}
+
 impl super::DeviceDriver for Device {
     fn compatible_with(node: &Node<'_>) -> bool {
         node.compatible_with("ns16550a")

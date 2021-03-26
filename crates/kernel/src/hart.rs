@@ -53,8 +53,10 @@ pub fn current() -> &'static HartContext {
 
     unsafe {
         asm!("csrr {}, sscratch", out(reg) addr);
-        &*(addr as *const _)
     }
+
+    assert_ne!(addr, 0, "Hart Local Context not yet initialized.");
+    unsafe { &*(addr as *const _) }
 }
 
 /// Initializes the context for this hart by allocating memory and then saving
