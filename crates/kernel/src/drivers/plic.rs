@@ -10,6 +10,17 @@ const CONTEXT_COUNT: usize = 15872;
 /// The default priority each interrupt gets at initialization.
 const DEFAULT_PRIORITY: u32 = 1;
 
+/// Representing a context inside the PLIC.
+#[repr(transparent)]
+pub struct Context(usize);
+
+impl Context {
+    /// Create a new context, from a raw context index.
+    pub unsafe fn new(raw: usize) -> Self {
+        Self(raw)
+    }
+}
+
 pub struct Controller {
     /// The maximum number of interrupts available.
     max_interrupts: usize,
@@ -23,11 +34,11 @@ pub struct Controller {
 
 impl Controller {
     /// Enable the interrupt with `id` for the given context.
-    pub fn enable(&mut self, ctx: usize, id: usize) {
+    pub fn enable(&mut self, ctx: Context, id: u32) {
         assert_ne!(id, 0, "interrupt with id 0 is invalid");
 
         // find the entry and bit to modify
-        let (entry, bit) = Self::enable_idx_bit(ctx, id);
+        let (entry, bit) = Self::enable_idx_bit(ctx.0, id as usize);
 
         // set the bit in `entry` to 1
         let addr = self.enable.index(entry);
@@ -36,11 +47,11 @@ impl Controller {
     }
 
     /// Disable the interrupt with `id` for the given context.
-    pub fn disable(&mut self, ctx: usize, id: usize) {
+    pub fn disable(&mut self, ctx: Context, id: usize) {
         assert_ne!(id, 0, "interrupt with id 0 is invalid");
 
         // find the entry and bit to modify
-        let (entry, bit) = Self::enable_idx_bit(ctx, id);
+        let (entry, bit) = Self::enable_idx_bit(ctx.0, id);
 
         // set the bit in `entry` to 0
         let addr = self.enable.index(entry);
@@ -50,8 +61,8 @@ impl Controller {
 
     /// Claim an interrupt, if it's pending, and return a guard that can be used
     /// to finish the interrupt.
-    pub fn claim(&mut self, ctx: usize) -> Option<ClaimGuard<'_>> {
-        let claim = unsafe { self.threshold_claim.index(ctx).add(1) };
+    pub fn claim(&mut self, ctx: Context) -> Option<ClaimGuard<'_>> {
+        let claim = unsafe { self.threshold_claim.index(ctx.0).add(1) };
 
         match claim.read() {
             0 => None,
@@ -64,15 +75,15 @@ impl Controller {
     }
 
     /// Set the threshold for the given context.
-    pub fn set_threshold(&mut self, ctx: usize, threshold: u32) {
-        let addr = self.threshold_claim.index(ctx);
+    pub fn set_threshold(&mut self, ctx: Context, threshold: u32) {
+        let addr = self.threshold_claim.index(ctx.0);
         addr.write(threshold);
     }
 
     /// Set the priority of the interrupt with `id`.
-    pub fn set_priority(&mut self, id: usize, priority: u32) {
+    pub fn set_priority(&mut self, id: u32, priority: u32) {
         assert_ne!(id, 0, "interrupt with id 0 is invalid");
-        self.priorities.index(id).write(priority);
+        self.priorities.index(id as usize).write(priority);
     }
 
     /// Get the entry index and bit for a context, interrupt-id pair

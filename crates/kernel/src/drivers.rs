@@ -5,6 +5,7 @@ use crate::hart;
 use crate::page::{self, PageSize, PageTable, Perm};
 use core::fmt;
 use devicetree::{node::Node, DeviceTree};
+use plic::ClaimGuard;
 use riscv::sync::{Mutex, MutexGuard};
 
 /// Macro for registering a list of device drivers.
@@ -50,6 +51,21 @@ pub trait DeviceDriver {
 
     /// Initializes this device driver.
     fn init(&mut self);
+
+    fn as_interruptable(&mut self) -> Option<&mut dyn Interruptable> {
+        None
+    }
+}
+
+pub trait Interruptable {
+    /// This method is called inside an external interrupt, if the interrupt has
+    /// the id that was previously returned by `interrupt_id` method.
+    ///
+    /// If this method returns `Ok(())`, the interrupt will be marked as completed.
+    fn handle_interrupt(&mut self, id: u32) -> Result<(), &'static str>;
+
+    /// Return the id of the interrupt this interruptable can handle.
+    fn interrupt_id(&self) -> u32;
 }
 
 declare_drivers![Plic: plic::Controller, Uart: ns16550a::Device];
@@ -107,9 +123,39 @@ impl DeviceManager {
 
     /// Initalize all devices inside this device manager.
     pub unsafe fn init(&self) {
-        if let Some(plic) = &mut *self.plic.lock() {
+        // firstly, initialize the PLIC since it will be used
+        // to register interrupts if possible.
+        let mut plic = self.plic.lock();
+        if let Some(plic) = plic.as_mut() {
             plic.init();
         }
+
+        // note that this will initialize the uart device twice, but i dont care
+        // so just do it
+        if let Some(uart) = self.uart.lock().as_mut() {
+            uart.init();
+
+            if let Some((uart, plic)) = uart.as_interruptable().zip(plic.as_mut()) {
+                let id = uart.interrupt_id();
+                plic.enable(hart::current().plic_context(), id);
+                plic.set_threshold(hart::current().plic_context(), 0);
+                plic.set_priority(id, 1);
+            }
+        }
+    }
+
+    /// Handle an external interrupt.
+    pub fn handle_interrupt(&self, irq: ClaimGuard<'_>) -> Result<(), &'static str> {
+        // check if the uart device supports interrupts
+        if let Some(uart) = self.uart.lock().as_mut().and_then(|d| d.as_interruptable()) {
+            uart.handle_interrupt(irq.id())?;
+
+            // on success, finish the interrupt and return
+            irq.finish();
+            return Ok(());
+        }
+
+        Ok(())
     }
 
     /// Get exclusive access to the PLIC.

@@ -1,6 +1,6 @@
 //! Hart local storage and context.
 
-use crate::drivers::DeviceManager;
+use crate::drivers::{plic, DeviceManager};
 use crate::{allocator, unit};
 use alloc::boxed::Box;
 use alloc::vec;
@@ -44,6 +44,12 @@ impl HartContext {
     #[inline]
     pub fn devices(&self) -> &'static DeviceManager {
         self.devices
+    }
+
+    /// Get the PLIC context for the current hart.
+    pub fn plic_context(&self) -> plic::Context {
+        let raw = 1 + 2 * self.id;
+        unsafe { plic::Context::new(raw as usize) }
     }
 }
 

@@ -1,4 +1,4 @@
-//! Interrupt handler
+//! Trap handler
 
 use crate::hart;
 use riscv::trap::Trap;
@@ -6,14 +6,14 @@ use riscv::trap::Trap;
 /// Installs the global trap handler by writing it's address
 /// into the stvec register.
 pub fn install_handler() {
-    let addr = _interrupt_handler as usize;
+    let addr = _trap_handler as usize;
     riscv::csr::stvec::write(addr);
 }
 
-/// The rust interrupt handler
+/// The rust trap handler
 ///
 /// The returned value will be the new `sepc` value.
-pub extern "C" fn interrupt_handler(
+pub extern "C" fn trap_handler(
     _frame: &mut TrapFrame,
     scause: usize,
     stval: usize,
@@ -29,24 +29,18 @@ pub extern "C" fn interrupt_handler(
 
     match cause {
         Trap::SupervisorExternalInterrupt => {
-            if let Some(claim) = hart::current()
-                .devices()
+            let dev = hart::current().devices();
+            if let Some(irq) = dev
                 .plic()
                 .as_mut()
-                .and_then(|p| p.claim(1))
+                .and_then(|p| p.claim(hart::current().plic_context()))
             {
-                assert_eq!(claim.id(), 10);
-
-                let mut uart = hart::current().devices().uart();
-                let uart = uart
-                    .as_mut()
-                    .expect("How's there no UART device when we got an UART interrupt?");
-
-                while let Some(x) = uart.try_read() {
-                    log::debug!("input: {}", x as char);
+                match hart::current().devices().handle_interrupt(irq) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        log::warn!("{} to run interrupt handler: {}", "Failed".yellow(), err)
+                    }
                 }
-
-                claim.finish();
             }
         }
         trap => panic!(
@@ -61,7 +55,7 @@ pub extern "C" fn interrupt_handler(
 /// The global trap handler that will save the registers and then
 /// jump to the rist code.
 #[naked]
-unsafe extern "C" fn _interrupt_handler() -> ! {
+unsafe extern "C" fn _trap_handler() -> ! {
     asm!(
         "
         // The trap handler must be aligned to 4, because
@@ -242,7 +236,7 @@ unsafe extern "C" fn _interrupt_handler() -> ! {
 
         // Jump out of the interrupt handler
         sret
-    ", sym interrupt_handler,
+    ", sym trap_handler,
         options(noreturn)
     )
 }

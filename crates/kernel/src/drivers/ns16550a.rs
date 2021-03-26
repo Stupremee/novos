@@ -4,14 +4,11 @@ use core::{fmt, ptr::NonNull};
 use devicetree::node::Node;
 
 pub struct Device {
+    interrupt_id: u32,
     base: NonNull<u8>,
 }
 
 impl Device {
-    pub unsafe fn new(base: NonNull<u8>) -> Self {
-        Self { base }
-    }
-
     /// Initialize this UART driver.
     pub fn init(&mut self) {
         let ptr = self.base.as_ptr();
@@ -163,11 +160,33 @@ impl super::DeviceDriver for Device {
         let base = node.regions().next()?.start();
         let uart = Device {
             base: NonNull::new(base as *mut _)?,
+            interrupt_id: node.prop("interrupts")?.as_u32()?,
         };
         Some(uart)
     }
 
     fn init(&mut self) {
         Device::init(self)
+    }
+
+    fn as_interruptable(&mut self) -> Option<&mut dyn super::Interruptable> {
+        Some(self)
+    }
+}
+
+impl super::Interruptable for Device {
+    fn handle_interrupt(&mut self, _: u32) -> Result<(), &'static str> {
+        // drain the input buffer
+        while let Some(c) = self.try_read() {
+            if c == b'S' {
+                sbi::system::shutdown();
+            }
+        }
+
+        Ok(())
+    }
+
+    fn interrupt_id(&self) -> u32 {
+        self.interrupt_id
     }
 }

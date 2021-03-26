@@ -18,9 +18,9 @@ pub mod allocator;
 pub mod boot;
 pub mod drivers;
 pub mod hart;
-pub mod interrupt;
 pub mod page;
 pub mod pmem;
+pub mod trap;
 pub mod unit;
 pub mod vmem;
 
@@ -36,20 +36,8 @@ pub fn main(_fdt: &DeviceTree<'_>) {
     unsafe {
         asm!("csrsi sstatus, 2");
         asm!("li t0, 1 << 9", "csrs sie, t0", out("t0") _);
-        //riscv::csr::sie::write(1 << 9);
     }
-
-    let mut plic = hart::current().devices().plic();
-    let plic = plic.as_mut().unwrap();
-
-    plic.enable(1, 0xA);
-    plic.set_threshold(1, 0);
-    plic.set_priority(0xA, 1);
-
-    //sbi::system::shutdown();
 }
 
 /// The entry point for each new hart that is not the boot hart.
-pub fn hmain() {
-    panic!("OH NO")
-}
+pub fn hmain() {}

@@ -3,9 +3,9 @@
 use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
 use crate::drivers::{ns16550a, DeviceDriver};
 use crate::{
-    drivers, hart, interrupt,
+    drivers, hart,
     page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
-    pmem, unit, StaticCell,
+    pmem, trap, unit, StaticCell,
 };
 use alloc::boxed::Box;
 use core::slice;
@@ -216,15 +216,18 @@ unsafe extern "C" fn entry_trampoline(
 /// This function also brings up the other harts.
 unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
     // install the interrupt handler
-    interrupt::install_handler();
+    trap::install_handler();
 
-    // initialize all device drivers
+    // create the devicemanager
     let devices = Box::leak(Box::new(drivers::DeviceManager::from_devicetree(fdt)));
-    devices.init();
 
     // initialize hart local storage and hart context
     hart::init_hart_context(hart_id as u64, true, devices).unwrap();
     log::info!("{} with id {} online", "Hart".green(), hart::current().id());
+
+    // initialize the devices here, because init requires hart local context to be
+    // initialized
+    devices.init();
 
     // switch to the new logger
     if log::init_log(drivers::GlobalLog).is_err() {
@@ -317,7 +320,7 @@ unsafe extern "C" fn rust_hart_entry(
     devices: &'static drivers::DeviceManager,
 ) -> ! {
     // install the interrupt handler
-    interrupt::install_handler();
+    trap::install_handler();
 
     // init hart local context
     hart::init_hart_context(hart_id as u64, false, devices).unwrap();
