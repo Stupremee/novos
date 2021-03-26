@@ -50,4 +50,6 @@ pub fn main(_fdt: &DeviceTree<'_>) {
 }
 
 /// The entry point for each new hart that is not the boot hart.
-pub fn hmain() {}
+pub fn hmain() {
+    panic!("OH NO")
+}
