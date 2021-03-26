@@ -10,7 +10,7 @@ use crate::{
 use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
-use riscv::{csr::satp, symbols, sync::Mutex};
+use riscv::{csr::satp, symbols};
 
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
@@ -71,9 +71,9 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 
     // try to find a uart device, and then set it as the global logger
     let stdout = fdt.chosen().stdout();
-    let uart_node = if let Some((mut uart, uart_node)) = stdout
+    if let Some(mut uart) = stdout
         .filter(|n| ns16550a::Device::compatible_with(n))
-        .and_then(|node| Some((ns16550a::Device::from_node(&node)?, node)))
+        .and_then(|node| ns16550a::Device::from_node(&node))
     {
         uart.init();
 
@@ -96,30 +96,13 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
                 sbi::system::fail_shutdown();
             }
         };
-
-        Some(uart_node)
-    } else {
-        None
-    };
+    }
 
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
 
     // get access to the global page table
     let table = &mut *PAGE_TABLE.get();
-
-    // map the uart mmio space
-    if let Some(reg) = uart_node.and_then(|node| node.regions().next()) {
-        assert!(reg.size() < PAGE_SIZE, "uart mmio space too big");
-        table
-            .map(
-                reg.start().into(),
-                reg.start().into(),
-                PageSize::Kilopage,
-                Perm::READ | Perm::WRITE,
-            )
-            .unwrap();
-    }
 
     // copy the devicetree to a newly allocated physical page
     let fdt_order = order_for_size(fdt.total_size() as usize);
@@ -236,9 +219,8 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
     interrupt::install_handler();
 
     // initialize all device drivers
-    let mut devices = drivers::DeviceManager::from_devicetree(fdt);
+    let devices = Box::leak(Box::new(drivers::DeviceManager::from_devicetree(fdt)));
     devices.init();
-    let devices = Box::leak(Box::new(Mutex::new(devices)));
 
     // initialize hart local storage and hart context
     hart::init_hart_context(hart_id as u64, true, devices).unwrap();
@@ -327,7 +309,7 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _virt_stack: usize) -> ! {
 /// The rust entry point for each additional hart.
 unsafe extern "C" fn rust_hart_entry(
     hart_id: usize,
-    devices: &'static Mutex<drivers::DeviceManager>,
+    devices: &'static drivers::DeviceManager,
 ) -> ! {
     // install the interrupt handler
     interrupt::install_handler();

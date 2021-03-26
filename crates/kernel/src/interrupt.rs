@@ -1,7 +1,6 @@
 //! Interrupt handler
 
 use crate::hart;
-use core::ptr::NonNull;
 use riscv::trap::Trap;
 
 /// Installs the global trap handler by writing it's address
@@ -30,14 +29,18 @@ pub extern "C" fn interrupt_handler(
 
     match cause {
         Trap::SupervisorExternalInterrupt => {
-            if let Some(claim) = hart::current().devices().plic().claim(1) {
+            if let Some(claim) = hart::current()
+                .devices()
+                .plic()
+                .as_mut()
+                .and_then(|p| p.claim(1))
+            {
                 assert_eq!(claim.id(), 10);
 
-                let mut uart = unsafe {
-                    crate::drivers::ns16550a::Device::new(
-                        NonNull::new(0x1000_0000 as *mut _).unwrap(),
-                    )
-                };
+                let mut uart = hart::current().devices().uart();
+                let uart = uart
+                    .as_mut()
+                    .expect("How's there no UART device when we got an UART interrupt?");
 
                 while let Some(x) = uart.try_read() {
                     log::debug!("input: {}", x as char);

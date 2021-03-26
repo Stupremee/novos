@@ -110,10 +110,6 @@ impl super::DeviceDriver for Controller {
 
         log::info!("{} the PLIC", "Initialized".green());
     }
-
-    fn as_plic(&mut self) -> Option<&mut Controller> {
-        Some(self)
-    }
 }
 
 /// Guard that can be used to finish an interrupt.

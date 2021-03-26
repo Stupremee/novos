@@ -39,8 +39,8 @@ pub fn main(_fdt: &DeviceTree<'_>) {
         //riscv::csr::sie::write(1 << 9);
     }
 
-    let mut plic = hart::current().devices();
-    let plic = plic.plic();
+    let mut plic = hart::current().devices().plic();
+    let plic = plic.as_mut().unwrap();
 
     plic.enable(1, 0xA);
     plic.set_threshold(1, 0);
