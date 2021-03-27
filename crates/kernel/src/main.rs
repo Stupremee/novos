@@ -32,12 +32,7 @@ pub use static_cell::StaticCell;
 use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
-pub fn main(_fdt: &DeviceTree<'_>) {
-    unsafe {
-        asm!("csrsi sstatus, 2");
-        asm!("li t0, 1 << 9", "csrs sie, t0", out("t0") _);
-    }
-}
+pub fn main(_fdt: &DeviceTree<'_>) {}
 
 /// The entry point for each new hart that is not the boot hart.
 pub fn hmain() {}

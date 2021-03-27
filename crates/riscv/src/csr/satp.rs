@@ -20,8 +20,8 @@ pub struct Satp {
 }
 
 /// Read from the `satp` CSR.
-pub fn read() -> Satp {
-    let bits = unsafe { _read() };
+pub unsafe fn read() -> Satp {
+    let bits = _read();
 
     let mode = match bits >> 60 {
         0 => Mode::Bare,

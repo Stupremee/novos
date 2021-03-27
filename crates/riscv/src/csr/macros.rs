@@ -1,13 +1,11 @@
 #![allow(unused)]
 
 macro_rules! write_csr {
-    ($(#[$meta:meta])* pub $number:expr) => {
-        write_csr!($number);
-
-        /// Writes the raw valuue into this CSR.
-        $(#[$meta])*
-        pub fn write(bits: usize) {
-            unsafe { _write(bits) };
+    (pub $number:expr) => {
+        /// Writes the raw value into this CSR.
+        #[inline(always)]
+        pub unsafe fn write(bits: usize) {
+            asm!("csrw {}, {}", const $number, in(reg) bits);
         }
     };
 
@@ -21,18 +19,18 @@ macro_rules! write_csr {
 }
 
 macro_rules! read_csr {
-    ($(#[$meta:meta])* pub $number:expr) => {
-        read_csr!($number);
-
+    (pub $number:expr) => {
         /// Read the raw bits out of this CSR.
-        $(#[$meta])*
-        pub fn read() -> usize {
-            unsafe { _read() }
+        #[inline(always)]
+        pub unsafe fn read() -> usize {
+            let bits;
+            asm!("csrr {}, {}", out(reg) bits, const $number);
+            bits
         }
     };
 
     ($number:expr) => {
-        /// Read the raw bits out of a CSR.
+        /// Read the raw bits out of this CSR.
         #[inline(always)]
         unsafe fn _read() -> usize {
             let bits;
@@ -43,13 +41,11 @@ macro_rules! read_csr {
 }
 
 macro_rules! set_csr {
-    ($(#[$meta:meta])* pub $number:expr) => {
-        set_csr!($number);
-
+    (pub $number:expr) => {
         /// Set all bits specified by the mask to one inside this CSR.
-        $(#[$meta])*
-        pub fn set(mask: usize) {
-            unsafe { _set(mask) };
+        #[inline(always)]
+        pub unsafe fn set(mask: usize) {
+            asm!("csrs {}, {}", const $number, in(reg) mask);
         }
     };
 
@@ -62,13 +58,13 @@ macro_rules! set_csr {
 }
 
 macro_rules! clear_csr {
-    ($(#[$meta:meta])* pub $number:expr) => {
+    (pub $number:expr) => {
         clear_csr!($number);
 
         /// Clear all bits specified by the mask inside this CSR.
-        $(#[$meta])*
-        pub fn clear(mask: usize) {
-            unsafe { _clear(mask) }
+        #[inline(always)]
+        pub unsafe fn clear(mask: usize) {
+            asm!("csrc {}, {}", const $number, in(reg) mask);
         }
     };
 
@@ -84,25 +80,18 @@ macro_rules! csr_mod {
     (rw, $name:ident, $num:expr) => {
         #[doc = concat!("The `", stringify!($name), "` CSR.")]
         pub mod $name {
-            read_csr!(
-                #[doc = concat!("Reads the raw value from the `", stringify!($name), "` register.")]
-                pub $num
-            );
+            read_csr!(pub $num);
 
-            write_csr!(
-                #[doc = concat!("Writes the raw value into the `", stringify!($name), "` register.")]
-                pub $num
-            );
+            write_csr!(pub $num);
+            set_csr!(pub $num);
+            clear_csr!(pub $num);
         }
     };
 
     (r, $name:ident, $num:expr) => {
         #[doc = concat!("The `", stringify!($name), "` CSR.")]
         pub mod $name {
-            read_csr!(
-                #[doc = concat!("Reads the raw value from the `", stringify!($name), "` register.")]
-                pub $num
-            );
+            read_csr!(pub $num);
         }
     };
 }

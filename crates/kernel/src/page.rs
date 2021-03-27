@@ -124,7 +124,7 @@ pub fn phys2virt(paddr: impl Into<PhysAddr>) -> VirtAddr {
     // FIXME: This is currently safe, since this is the only access to satp.
     // However in the future there must be some global lock to provide
     // safe access the the global page_table.
-    let mode = riscv::csr::satp::read().mode;
+    let mode = unsafe { riscv::csr::satp::read().mode };
 
     // if paging is not enabled, return the physical address.
     if matches!(mode, riscv::csr::satp::Mode::Bare) {
@@ -140,12 +140,12 @@ static ROOT_TABLE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Check if paging is enabled.
 pub fn enabled() -> bool {
-    !matches!(riscv::csr::satp::read().mode, riscv::csr::satp::Mode::Bare)
+    unsafe { !matches!(riscv::csr::satp::read().mode, riscv::csr::satp::Mode::Bare) }
 }
 
 /// Get exclusive access to the global page table.
 pub fn root() -> TableGuard {
-    let table = riscv::csr::satp::read().root_table;
+    let table = unsafe { riscv::csr::satp::read().root_table };
     TableGuard {
         table: unsafe { &mut *(table as *mut _) },
         _guard: ROOT_TABLE_LOCK.lock(),

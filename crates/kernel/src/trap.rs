@@ -1,13 +1,22 @@
 //! Trap handler
 
 use crate::hart;
-use riscv::trap::Trap;
+use riscv::{csr, trap::Trap};
 
 /// Installs the global trap handler by writing it's address
 /// into the stvec register.
+///
+/// This method will also enable external interrupts and timer interrupts.
 pub fn install_handler() {
     let addr = _trap_handler as usize;
-    riscv::csr::stvec::write(addr);
+    unsafe {
+        // Tell the CPU that our trap handler is at `addr`
+        csr::stvec::write(addr);
+
+        // Enable external interrupts
+        csr::sie::set((1 << 9) | (1 << 5) | (1 << 1));
+        csr::sstatus::set(1 << 1);
+    }
 }
 
 /// The rust trap handler
@@ -29,6 +38,9 @@ pub extern "C" fn trap_handler(
 
     match cause {
         Trap::SupervisorExternalInterrupt => {
+            // If there is a PLIC, and it has a pending interrupt,
+            // we pass it on to our devicemanager which will redirect the interrupt
+            // to the corresponding device.
             let dev = hart::current().devices();
             if let Some(irq) = dev
                 .plic()
