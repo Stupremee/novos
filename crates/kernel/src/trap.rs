@@ -55,6 +55,9 @@ pub extern "C" fn trap_handler(
                 }
             }
         }
+        Trap::SupervisorTimerInterrupt => {
+            log::debug!("got timer interrupt");
+        }
         trap => panic!(
             "Unhandled trap: {:?} pc: {:#x?} tval: {:#x?}",
             trap, sepc, stval

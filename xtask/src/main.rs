@@ -19,6 +19,7 @@ SUBCOMMANDS:
     opensbi         Build the OpenSBI firmware using Nix.
     build           Build the NovOS kernel without running it.
     run             Build and run the NovOS kernel using QEMU.
+    watch           Use cargo-watch to check the kernel.
 ";
 
 fn main() -> Result<()> {
@@ -35,6 +36,7 @@ fn main() -> Result<()> {
 
     match args.subcommand()?.as_deref() {
         Some("opensbi") => cmd!("nix-build nix/opensbi.nix").run()?,
+        Some("watch") => watch()?,
         Some("build") => {
             // build the kernel
             let no_release = args.contains("--no-release");
@@ -115,6 +117,11 @@ fn build(no_release: bool) -> Result<()> {
         "cargo build --target riscv64gc-unknown-none-elf -Zbuild-std=core,alloc -p kernel {release...}"
     )
     .run()?;
+    Ok(())
+}
+
+fn watch() -> Result<()> {
+    cmd!("cargo watch -c -x 'clippy -p kernel' -x 'doc -p kernel'").run()?;
     Ok(())
 }
 
