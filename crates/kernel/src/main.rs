@@ -34,6 +34,11 @@ use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
 pub fn main(fdt: &DeviceTree<'_>) -> ! {
+    // initialize all devices
+    unsafe {
+        hart::current().devices().init();
+    }
+
     // initialize the global logging system
     log::init_log(GlobalLog).map_err(|_| ()).unwrap();
 

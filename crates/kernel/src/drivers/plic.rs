@@ -11,6 +11,7 @@ const CONTEXT_COUNT: usize = 15872;
 const DEFAULT_PRIORITY: u32 = 1;
 
 /// Representing a context inside the PLIC.
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Context(usize);
 

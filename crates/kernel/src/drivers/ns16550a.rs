@@ -24,6 +24,11 @@ impl Device {
             let lcr = ptr.offset(3);
             lcr.write_volatile(lcr_value);
 
+            // Enable received data available interrupt,
+            // by writing `1` into the IER register.
+            let ier = ptr.offset(1);
+            ier.write_volatile(0x01);
+
             // "Calculating" the divisor required for the baud rate.
             let divisor = 592u16;
             let divisor = divisor.to_le();

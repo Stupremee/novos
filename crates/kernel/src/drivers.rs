@@ -1,6 +1,7 @@
 pub mod ns16550a;
 pub mod plic;
 
+use crate::hart;
 use crate::page::{self, PageSize, PageTable, Perm};
 use alloc::boxed::Box;
 use devicetree::{node::Node, DeviceTree};
@@ -158,7 +159,22 @@ impl DeviceManager {
 
     /// Initalize all devices inside this device manager.
     pub unsafe fn init(&self) {
+        // init all devices
         self.devices().for_each(|dev| dev.init());
+
+        // if theres a PLIC, enable interrupts for all devices that support interrupts
+        if let Some(plic) = self.plic() {
+            let ctx = hart::current().plic_context();
+            plic.set_threshold(ctx, 0);
+
+            self.devices()
+                .filter_map(|d| d.as_interruptable())
+                .for_each(|dev| {
+                    let id = dev.interrupt_id();
+                    plic.enable(ctx, id);
+                    plic.set_priority(id, 1);
+                });
+        }
     }
 
     /// Handle an external interrupt.
