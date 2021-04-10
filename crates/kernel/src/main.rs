@@ -29,10 +29,76 @@ mod panic;
 mod static_cell;
 pub use static_cell::StaticCell;
 
+use core::fmt;
 use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
-pub fn main(_fdt: &DeviceTree<'_>) {}
+pub fn main(fdt: &DeviceTree<'_>) -> ! {
+    // initialize the global logging system
+    log::init_log(GlobalLog).map_err(|_| ()).unwrap();
 
-/// The entry point for each new hart that is not the boot hart.
-pub fn hmain() {}
+    log_core_online(fdt);
+
+    loop {
+        riscv::asm::wfi();
+    }
+}
+
+fn log_core_online(fdt: &DeviceTree<'_>) {
+    // get a human readable representation of the ISA
+    let node = fdt
+        .cpus()
+        .children()
+        .find(|node| node.unit_address() == Some(hart::current().id()));
+
+    let isa = node
+        .and_then(|n| n.prop("riscv,isa")?.as_str())
+        .unwrap_or("Unknown");
+
+    // get the architecture name
+    let arch = match sbi::base::marchid() {
+        Ok(0) => "Qemu/SiFive",
+        Ok(1) => "Rocket",
+        Ok(2) => "BOOM",
+        Ok(3) => "Ariane",
+        Ok(4) => "RI5CY",
+        Ok(5) => "Spike",
+        Ok(6) => "E-Class",
+        Ok(7) => "ORCA",
+        Ok(8) => "SCR1",
+        Ok(9) => "YARVI",
+        Ok(10) => "RVBS",
+        Ok(11) => "SweRV EH1",
+        Ok(12) => "MSCC",
+        Ok(13) => "BlackParrot",
+        Ok(14) => "BaseJump Manycore",
+        Ok(15) => "C-Class",
+        Ok(16) => "SweRV EL2",
+        Ok(17) => "SweRV EH2",
+        Ok(18) => "SERV",
+        Ok(19) => "NEORV32",
+        Ok(_) => "Unknown",
+        Err(_) => "Error",
+    };
+
+    log::info!(
+        "Physical Core {} ({} on {}) online",
+        hart::current().id().green(),
+        isa.magenta(),
+        arch.blue(),
+    );
+}
+
+/// A global logger that uses the hart local context to access the Logger.
+pub struct GlobalLog;
+
+impl log::Logger for GlobalLog {
+    fn write_str(&self, x: &str) -> fmt::Result {
+        let devices = hart::current().devices();
+        if let Some(dev) = devices.logger() {
+            dev.write_str(x)?;
+        }
+
+        Ok(())
+    }
+}

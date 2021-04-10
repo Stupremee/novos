@@ -10,7 +10,7 @@ pub struct Device {
 
 impl Device {
     /// Initialize this UART driver.
-    pub fn init(&mut self) {
+    pub fn init(&self) {
         let ptr = self.base.as_ptr();
         unsafe {
             // First, enable FIFO by setting the first bit of the FCR
@@ -23,11 +23,6 @@ impl Device {
             let lcr_value = 0x03;
             let lcr = ptr.offset(3);
             lcr.write_volatile(lcr_value);
-
-            // Enable received data available interrupt,
-            // by writing `1` into the IER register.
-            let ier = ptr.offset(1);
-            ier.write_volatile(0x01);
 
             // "Calculating" the divisor required for the baud rate.
             let divisor = 592u16;
@@ -50,12 +45,12 @@ impl Device {
     /// Tries to read incoming data.
     ///
     /// Returns `None` if there's currently no data available.
-    pub fn try_read(&mut self) -> Option<u8> {
+    pub fn try_read(&self) -> Option<u8> {
         self.data_ready().then(|| unsafe { self.read_data() })
     }
 
     /// Spins the hart until new data is available.
-    pub fn read(&mut self) -> u8 {
+    pub fn read(&self) -> u8 {
         while !self.data_ready() {}
 
         // SAFETY
@@ -66,7 +61,7 @@ impl Device {
     /// Tries to write data into the transmitter.
     ///
     /// Returns `Some(x)`, containing the given `x`, if the transmitter is not ready.
-    pub fn try_write(&mut self, x: u8) -> Option<u8> {
+    pub fn try_write(&self, x: u8) -> Option<u8> {
         if self.transmitter_empty() {
             // SAFETY
             // We checked if the transmitter is empty
@@ -80,7 +75,7 @@ impl Device {
     }
 
     /// Spins this hart until the given data can be written.
-    pub fn write(&mut self, x: u8) {
+    pub fn write(&self, x: u8) {
         while !self.transmitter_empty() {}
 
         // SAFETY
@@ -105,7 +100,7 @@ impl Device {
     /// # Safety
     ///
     /// Must only be called if the transmitter is ready.
-    unsafe fn write_data(&mut self, x: u8) {
+    unsafe fn write_data(&self, x: u8) {
         let ptr = self.base.as_ptr();
         ptr.write_volatile(x)
     }
@@ -136,18 +131,12 @@ impl Device {
 unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
 
-impl fmt::Write for Device {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
+impl log::Logger for Device {
+    fn write_str(&self, s: &str) -> fmt::Result {
         for x in s.bytes() {
             self.write(x);
         }
         Ok(())
-    }
-}
-
-impl log::Logger for Device {
-    fn hart_id(&self) -> Option<usize> {
-        None
     }
 }
 
@@ -165,17 +154,21 @@ impl super::DeviceDriver for Device {
         Some(uart)
     }
 
-    fn init(&mut self) {
+    unsafe fn init(&self) {
         Device::init(self)
     }
 
-    fn as_interruptable(&mut self) -> Option<&mut dyn super::Interruptable> {
+    fn as_interruptable(&self) -> Option<&dyn super::Interruptable> {
+        Some(self)
+    }
+
+    fn as_logger(&self) -> Option<&dyn log::Logger> {
         Some(self)
     }
 }
 
 impl super::Interruptable for Device {
-    fn handle_interrupt(&mut self, _: u32) -> Result<(), &'static str> {
+    fn handle_interrupt(&self, _: u32) -> Result<(), &'static str> {
         // drain the input buffer
         while let Some(c) = self.try_read() {
             if c == b'S' {

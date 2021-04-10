@@ -21,6 +21,12 @@ impl<'tree> Node<'tree> {
         self.name
     }
 
+    /// Parse the unit address of this nodes name.
+    pub fn unit_address(&self) -> Option<u64> {
+        let addr = self.name().split('@').nth(1)?;
+        addr.parse().ok()
+    }
+
     /// The level of this node inside the device tree.
     pub fn level(&self) -> u8 {
         self.level

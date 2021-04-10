@@ -34,7 +34,7 @@ pub struct Controller {
 
 impl Controller {
     /// Enable the interrupt with `id` for the given context.
-    pub fn enable(&mut self, ctx: Context, id: u32) {
+    pub fn enable(&self, ctx: Context, id: u32) {
         assert_ne!(id, 0, "interrupt with id 0 is invalid");
 
         // find the entry and bit to modify
@@ -47,7 +47,7 @@ impl Controller {
     }
 
     /// Disable the interrupt with `id` for the given context.
-    pub fn disable(&mut self, ctx: Context, id: usize) {
+    pub fn disable(&self, ctx: Context, id: usize) {
         assert_ne!(id, 0, "interrupt with id 0 is invalid");
 
         // find the entry and bit to modify
@@ -61,7 +61,7 @@ impl Controller {
 
     /// Claim an interrupt, if it's pending, and return a guard that can be used
     /// to finish the interrupt.
-    pub fn claim(&mut self, ctx: Context) -> Option<ClaimGuard<'_>> {
+    pub fn claim(&self, ctx: Context) -> Option<ClaimGuard<'_>> {
         let claim = unsafe { self.threshold_claim.index(ctx.0).add(1) };
 
         match claim.read() {
@@ -75,13 +75,13 @@ impl Controller {
     }
 
     /// Set the threshold for the given context.
-    pub fn set_threshold(&mut self, ctx: Context, threshold: u32) {
+    pub fn set_threshold(&self, ctx: Context, threshold: u32) {
         let addr = self.threshold_claim.index(ctx.0);
         addr.write(threshold);
     }
 
     /// Set the priority of the interrupt with `id`.
-    pub fn set_priority(&mut self, id: u32, priority: u32) {
+    pub fn set_priority(&self, id: u32, priority: u32) {
         assert_ne!(id, 0, "interrupt with id 0 is invalid");
         self.priorities.index(id as usize).write(priority);
     }
@@ -113,13 +113,11 @@ impl super::DeviceDriver for Controller {
         }
     }
 
-    fn init(&mut self) {
+    unsafe fn init(&self) {
         // set the default priority for each interrupt
         for id in 1..self.max_interrupts {
             self.priorities.index(id).write(DEFAULT_PRIORITY)
         }
-
-        log::info!("{} the PLIC", "Initialized".green());
     }
 }
 

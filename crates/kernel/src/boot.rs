@@ -1,10 +1,9 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
 use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
-use crate::drivers::{ns16550a, DeviceDriver};
 use crate::{
     drivers, hart,
-    page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
+    page::{self, PageSize, PageTable, Perm},
     pmem, trap, unit, StaticCell,
 };
 use alloc::boxed::Box;
@@ -14,7 +13,7 @@ use riscv::{csr::satp, symbols};
 
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
-/// The base virtual addresses where the stacks for every hart are located.
+/// The base virtual addresses where the stack for every hart is located.
 pub const KERNEL_STACK_BASE: usize = 0x001D_DD00_0000;
 
 /// The stack size for each hart.
@@ -28,75 +27,11 @@ pub const KERNEL_PHYS_MEM_BASE: usize = 0x001F_FF00_0000;
 /// The base virtual address where the allocator will start allocating virtual memory.
 pub const KERNEL_VMEM_ALLOC_BASE: usize = 0x0000_AA00_0000;
 
-/// The maximum number of harts that will try to be started.
-pub const HART_COUNT: usize = 4;
-
-/// Allocates the stack for a hart, with the given id and returns the end address
-/// of the new stack.
-///
-/// Returns both, the physical and virtual address to the end of the stack.
-fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (PhysAddr, VirtAddr) {
-    // calculate the start address for hart `id`s stack
-    let start = KERNEL_STACK_BASE + (id as usize * (KERNEL_STACK_SIZE + PAGE_SIZE));
-    let guard_start = start + KERNEL_STACK_SIZE;
-
-    // TODO: map guard pages around the stack
-    // allocate the new stack
-    table
-        .map_alloc(
-            start.into(),
-            KERNEL_STACK_SIZE / PAGE_SIZE,
-            PageSize::Kilopage,
-            Perm::READ | Perm::WRITE,
-        )
-        .unwrap();
-
-    // map the guard page
-    table
-        .map(0.into(), guard_start.into(), PageSize::Kilopage, Perm::EXEC)
-        .unwrap();
-
-    // get the physical and virtual address
-    let vaddr = start + KERNEL_STACK_SIZE;
-    let paddr: usize = table.translate(start.into()).unwrap().0.into();
-
-    (PhysAddr::from(paddr + KERNEL_STACK_SIZE), vaddr.into())
-}
-
 /// The code that sets up memory stuff,
 /// allocates a new stack and then runs the real main function.
 #[no_mangle]
 unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     let fdt = DeviceTree::from_ptr(fdt).unwrap();
-
-    // try to find a uart device, and then set it as the global logger
-    let stdout = fdt.chosen().stdout();
-    if let Some(mut uart) = stdout
-        .filter(|n| ns16550a::Device::compatible_with(n))
-        .and_then(|node| ns16550a::Device::from_node(&node))
-    {
-        uart.init();
-
-        match log::init_log(uart) {
-            Ok(_) => log::info!(
-                "{} the global logging system using UART.",
-                "Initialized".green()
-            ),
-            // special case, we will instantly shutdown if we failed to initialize the logger
-            // this is a pseudo panic since panic wont print anything
-            Err(mut uart) => {
-                use core::fmt::Write;
-
-                // FIXME: Use colors here
-                write!(
-                    uart,
-                    "Failed to initialize the global logger. Shutting down..."
-                )
-                .unwrap();
-                sbi::system::fail_shutdown();
-            }
-        };
-    }
 
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
@@ -137,7 +72,6 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
                 .map(page.into(), page.into(), PageSize::Kilopage, perm)
                 .unwrap();
         }
-        log::debug!("Mapped kernel section {:x?}..{:x?} | {}", start, end, perm);
     };
 
     map_section(symbols::text_range(), Perm::READ | Perm::EXEC);
@@ -148,7 +82,14 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
 
     // allocate the stack for this hart
-    let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
+    table
+        .map_alloc(
+            KERNEL_STACK_BASE.into(),
+            KERNEL_STACK_SIZE / PAGE_SIZE,
+            PageSize::Kilopage,
+            Perm::READ | Perm::WRITE,
+        )
+        .unwrap();
 
     // enable paging
     satp::write(satp::Satp {
@@ -168,7 +109,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     entry_trampoline(
         hart_id,
         page::phys2virt(&fdt as *const _).as_ptr(),
-        stack.into(),
+        KERNEL_STACK_BASE + KERNEL_STACK_SIZE,
         rust_trampoline as usize,
         page::phys2virt(gp).into(),
     )
@@ -223,115 +164,9 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
 
     // initialize hart local storage and hart context
     hart::init_hart_context(hart_id as u64, true, devices).unwrap();
-    log::info!("{} with id {} online", "Hart".green(), hart::current().id());
 
-    // initialize the devices here, because init requires hart local context to be
-    // initialized
-    devices.init();
-
-    // switch to the new logger
-    if log::init_log(drivers::GlobalLog).is_err() {
-        panic!("Failed to switch to new global logger");
-    }
-
-    let mut table = page::root();
-
-    // bring up all other harts
-    for cpu in fdt
-        .cpus()
-        .children()
-        .filter(|node| node.name().starts_with("cpu@"))
-    {
-        // get the id for the hart
-        let id = cpu.prop("reg").unwrap().as_u32().unwrap();
-
-        // skip ourself
-        if hart_id == id as usize {
-            continue;
-        }
-
-        // allocate the stack for the new hart
-        let (_phys_stack, virt_stack) = alloc_kernel_stack(&mut *table, id.into());
-
-        // we need to pass the device manager to the new hart
-        virt_stack
-            .as_ptr::<usize>()
-            .offset(-1)
-            .write_volatile(devices as *const _ as usize);
-
-        match sbi::hsm::start(id as usize, hart_entry as usize, virt_stack.into()) {
-            Ok(()) => {}
-            Err(err) => {
-                log::warn!("{} to start hart {}: {:?}", "Failed".yellow(), id, err);
-            }
-        }
-    }
-    // explicitly drop, otherwise the table lock would never be dropped
-    drop(table);
-
-    crate::main(fdt);
-
-    loop {
-        riscv::asm::wfi();
-    }
-}
-
-/// The entrypoint for the other harts.
-#[naked]
-unsafe extern "C" fn hart_entry(_hart_id: usize, _virt_stack: usize) -> ! {
-    asm!(
-        "
-            // Load global pointer
-            la t0, __global_pointer$
-            li t1, {}
-            sub t0, t0, t1
-
-        .option push
-        .option norelax
-            mv gp, t0
-        .option pop
-
-
-            mv sp, a1
-
-            // Enable paging
-            la t0, {}
-            srli t0, t0, 12
-
-            li t1, 8
-            slli t1, t1, 60
-            or t0, t1, t0
-
-            csrw satp, t0
-            sfence.vma
-
-            ld a1, -8(sp)
-
-            // Jump to rust code
-            j {}
-         ", const KERNEL_PHYS_MEM_BASE, sym PAGE_TABLE, sym rust_hart_entry,
-        options(noreturn)
-    )
-}
-
-/// The rust entry point for each additional hart.
-unsafe extern "C" fn rust_hart_entry(
-    hart_id: usize,
-    devices: &'static drivers::DeviceManager,
-) -> ! {
-    // install the interrupt handler
-    trap::install_handler();
-
-    // init hart local context
-    hart::init_hart_context(hart_id as u64, false, devices).unwrap();
-
-    log::info!("{} with ID {} online", "Hart".green(), hart::current().id(),);
-
-    crate::hmain();
-
-    loop {
-        riscv::asm::wfi();
-    }
+    // jump into safe rust code
+    crate::main(fdt)
 }
 
 /// The entrypoint for the whole kernel.
