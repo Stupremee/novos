@@ -37,6 +37,15 @@ pub fn main(fdt: &DeviceTree<'_>) -> ! {
     // initialize the global logging system
     log::init_log(GlobalLog).map_err(|_| ()).unwrap();
 
+    // print the hello message with some statistics
+    let cores = fdt.find_nodes("/cpus/cpu@").count();
+    log::info!(
+        "{} starting with {} cores and {} physical memory",
+        "NovOS".green(),
+        cores,
+        unit::bytes(pmem::alloc_stats().total),
+    );
+
     log_core_online(fdt);
 
     loop {

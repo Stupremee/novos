@@ -19,6 +19,7 @@
 pub mod base;
 pub mod hsm;
 pub mod ipi;
+pub mod legacy;
 pub mod system;
 pub mod timer;
 

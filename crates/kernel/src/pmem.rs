@@ -9,7 +9,7 @@ use crate::allocator::{
     rangeset::{self, Range},
     BuddyAllocator, RangeSet,
 };
-use crate::{page, unit};
+use crate::page;
 use devicetree::DeviceTree;
 use riscv::sync::Mutex;
 
@@ -54,30 +54,15 @@ pub unsafe fn init(tree: &DeviceTree<'_>) -> Result<(), Error> {
     let mut alloc = PHYS_MEM.0.lock();
 
     // add each region to the global allocator and get the amount of total bytes
-    let bytes = mem
-        .as_slice()
+    mem.as_slice()
         .iter()
-        .try_fold(0usize, |acc, &Range { start, end }| {
+        .try_for_each(|&Range { start, end }| {
             let start = NonNull::new(start as *mut u8).ok_or(Error::NullRegion)?;
             let end = NonNull::new(end as *mut u8).ok_or(Error::NullRegion)?;
 
-            log::debug!(
-                "{} memory region at {:x?}..{:x?} available as physical memory.",
-                "Making".magenta(),
-                start,
-                end
-            );
-
-            let bytes = alloc.add_region(start, end).map_err(Error::Alloc)?;
-
-            Ok::<_, Error>(acc + bytes)
+            alloc.add_region(start, end).map_err(Error::Alloc)?;
+            Ok(())
         })?;
-
-    log::info!(
-        "{} the physical memory allocator with {} free memory",
-        "Initialized".green(),
-        unit::bytes(bytes),
-    );
 
     Ok(())
 }

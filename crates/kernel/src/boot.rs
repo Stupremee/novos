@@ -27,11 +27,25 @@ pub const KERNEL_PHYS_MEM_BASE: usize = 0x001F_FF00_0000;
 /// The base virtual address where the allocator will start allocating virtual memory.
 pub const KERNEL_VMEM_ALLOC_BASE: usize = 0x0000_AA00_0000;
 
+struct SbiLogger;
+impl log::Logger for SbiLogger {
+    fn write_str(&self, x: &str) -> core::fmt::Result {
+        let _ = x.chars().try_for_each(sbi::legacy::put_char);
+        Ok(())
+    }
+}
+
 /// The code that sets up memory stuff,
 /// allocates a new stack and then runs the real main function.
 #[no_mangle]
 unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     let fdt = DeviceTree::from_ptr(fdt).unwrap();
+
+    // if the underyling sbi implementation supports `put_char`, use it as a
+    // temporary logger
+    if sbi::base::probe_ext(0x01).unwrap_or(false) {
+        log::init_log(SbiLogger).map_err(|_| ()).unwrap();
+    }
 
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
