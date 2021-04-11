@@ -140,6 +140,8 @@ unsafe extern "C" fn entry_trampoline(
 ) -> ! {
     #[rustfmt::skip]
     asm!("
+        # This trampoline code is responsible for switchting to a new stack, that
+        # is located in virtual memory, by copying the old stack into the new one.
         mv t0, sp
         mv sp, a2
         mv t1, a2
@@ -157,7 +159,7 @@ unsafe extern "C" fn entry_trampoline(
         
         j copy_stack
 
-        // Jump into rust code again
+        # Jump into rust code again
     copy_stack_done:
         jr a3
     ",
@@ -176,6 +178,7 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
 
     // initialize hart local storage and hart context
     hart::init_hart_context(hart_id as u64, true, devices).unwrap();
+    hart::init_hart_local_storage().unwrap();
 
     // jump into safe rust code
     crate::main(fdt)
@@ -191,18 +194,18 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
 unsafe extern "C" fn _boot() -> ! {
     asm!(
         "
-            // Load the global pointer into
-            // the `gp` register
+            # Load the global pointer into
+            # the `gp` register
         .option push
         .option norelax
-            la gp, __global_pointer$
+            lla gp, __global_pointer$
         .option pop
 
-            // Disable interrupts
+            # Disable interrupts
             csrw sie, zero
             csrci sstatus, 2
 
-            // Zero bss section
+            # Zero bss section
             la t0, __bss_start
             la t1, __bss_end
 
@@ -214,7 +217,7 @@ unsafe extern "C" fn _boot() -> ! {
 
         zero_bss_done:
 
-            // Jump into rust code
+            # Jump into rust code
             la sp, __stack_end
             j _before_main",
         options(noreturn)

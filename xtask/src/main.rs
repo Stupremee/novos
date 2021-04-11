@@ -105,6 +105,7 @@ fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
         let mut cmd: std::process::Command = cmd!(
             "
             spike
+                -p{cpus}
                 -m{ram}
                 --kernel={path}
                 {gdb...}

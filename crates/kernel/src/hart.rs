@@ -1,7 +1,7 @@
 //! Hart local storage and context.
 
 use crate::drivers::{plic, DeviceManager};
-use crate::{allocator, unit};
+use crate::{allocator, page, pmem, unit};
 use alloc::boxed::Box;
 use alloc::vec;
 use core::mem::ManuallyDrop;
@@ -95,6 +95,27 @@ pub unsafe fn init_hart_context(
     // store the address inside the sscratch register to make it
     // available everywhere on this hart
     asm!("csrw sscratch, {}", in(reg) ptr);
+
+    Ok(())
+}
+
+/// Initialize the ELF Hart local storage, that can be used via the `thread_local` attribute.
+pub unsafe fn init_hart_local_storage() -> Result<(), allocator::Error> {
+    // get the range of the tdata section to copy
+    let (start, end) = riscv::symbols::tdata_range();
+    let len = end as usize - start as usize;
+
+    // allocate new memory for the tdata section
+    let order = allocator::order_for_size(len);
+    let new = page::phys2virt(pmem::alloc_order(order)?.as_ptr()).as_ptr::<u8>();
+    let new = core::slice::from_raw_parts_mut(new, len);
+
+    // copy the memory to the newly allocated data
+    let original = core::slice::from_raw_parts(start, len);
+    new.copy_from_slice(original);
+
+    // set the thread pointer register
+    asm!("mv tp, {}", in(reg) new.as_ptr());
 
     Ok(())
 }

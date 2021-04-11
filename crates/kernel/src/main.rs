@@ -8,7 +8,8 @@
     exclusive_range_pattern,
     alloc_error_handler,
     allocator_api,
-    fn_align
+    fn_align,
+    thread_local
 )]
 #![allow(clippy::missing_safety_doc, clippy::empty_loop)]
 
@@ -55,6 +56,13 @@ pub fn main(fdt: &DeviceTree<'_>) -> ! {
 
     log_core_online(fdt);
 
+    loop {
+        riscv::asm::wfi();
+    }
+}
+
+/// The entrypoint for all other harts.
+pub fn hmain() -> ! {
     loop {
         riscv::asm::wfi();
     }
