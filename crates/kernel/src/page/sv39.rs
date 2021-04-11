@@ -231,6 +231,22 @@ impl super::PageTable for Table {
             (ppn.offset(off), size)
         })
     }
+
+    fn mark_dirty(&mut self, vaddr: VirtAddr) {
+        if let Some(Mapping { entry, .. }) = self.traverse(vaddr) {
+            unsafe {
+                (&mut *entry).set_dirty(true);
+            }
+        }
+    }
+
+    fn mark_accessed(&mut self, vaddr: VirtAddr) {
+        if let Some(Mapping { entry, .. }) = self.traverse(vaddr) {
+            unsafe {
+                (&mut *entry).set_accessed(true);
+            }
+        }
+    }
 }
 
 /// Structure that stores the result of a traverse operation.
@@ -260,6 +276,10 @@ impl Entry {
     pub const USER: u64 = 1 << 4;
     /// The `G` bit of a PTE.
     pub const GLOBAL: u64 = 1 << 5;
+    /// The `A` bit of a PTE.
+    pub const ACCESSED: u64 = 1 << 6;
+    /// The `D` bit of a PTE.
+    pub const DIRTY: u64 = 1 << 7;
 
     /// Get the kind of this entry.
     pub fn kind(&self) -> Option<EntryKind> {
@@ -278,6 +298,26 @@ impl Entry {
     #[inline]
     pub fn branch(&self) -> bool {
         self.perm() == Perm::from(0u8) && self.valid()
+    }
+
+    /// Set the dirty bit of this entry to the given value.
+    #[inline]
+    pub fn set_dirty(&mut self, x: bool) {
+        if x {
+            self.0 |= Entry::DIRTY;
+        } else {
+            self.0 &= !Entry::DIRTY;
+        }
+    }
+
+    /// Set the accessed bit of this entry to the given value.
+    #[inline]
+    pub fn set_accessed(&mut self, x: bool) {
+        if x {
+            self.0 |= Entry::ACCESSED;
+        } else {
+            self.0 &= !Entry::ACCESSED;
+        }
     }
 
     /// Set the raw value of this entry to the given value.

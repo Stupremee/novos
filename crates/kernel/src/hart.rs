@@ -53,16 +53,21 @@ impl HartContext {
     }
 }
 
-/// Get the context for the current hart.
-pub fn current() -> &'static HartContext {
+/// Get the context for the current hart, but returns None if the hart local context
+/// was not initialized yet.
+pub fn try_current() -> Option<&'static HartContext> {
     let addr: usize;
 
     unsafe {
         asm!("csrr {}, sscratch", out(reg) addr);
     }
 
-    assert_ne!(addr, 0, "Hart Local Context not yet initialized.");
-    unsafe { &*(addr as *const _) }
+    (addr != 0).then(|| unsafe { &*(addr as *const _) })
+}
+
+/// Get the context for the current hart.
+pub fn current() -> &'static HartContext {
+    try_current().expect("Hart local context not yet initialized")
 }
 
 /// Initializes the context for this hart by allocating memory and then saving

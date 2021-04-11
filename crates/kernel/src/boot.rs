@@ -74,7 +74,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
                 page.into(),
                 vaddr.into(),
                 PageSize::Megapage,
-                Perm::READ | Perm::WRITE,
+                Perm::READ | Perm::WRITE | Perm::ACCESSED | Perm::DIRTY,
             )
             .unwrap();
     }
@@ -83,7 +83,12 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     let mut map_section = |(start, end): (*mut u8, *mut u8), perm: Perm| {
         for page in (start as usize..end as usize).step_by(PAGE_SIZE) {
             table
-                .map(page.into(), page.into(), PageSize::Kilopage, perm)
+                .map(
+                    page.into(),
+                    page.into(),
+                    PageSize::Kilopage,
+                    perm | Perm::ACCESSED | Perm::DIRTY,
+                )
                 .unwrap();
         }
     };
@@ -101,7 +106,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
             KERNEL_STACK_BASE.into(),
             KERNEL_STACK_SIZE / PAGE_SIZE,
             PageSize::Kilopage,
-            Perm::READ | Perm::WRITE,
+            Perm::READ | Perm::WRITE | Perm::ACCESSED | Perm::DIRTY,
         )
         .unwrap();
 
@@ -116,16 +121,12 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     // we need to convert the devicetree to use virtual memory
     let fdt = DeviceTree::from_ptr(page::phys2virt(fdt.as_ptr()).as_ptr()).unwrap();
 
-    let gp: usize;
-    asm!("mv {}, gp", out(reg) gp);
-
     // jump to rust code using the trampoline
     entry_trampoline(
         hart_id,
         page::phys2virt(&fdt as *const _).as_ptr(),
         KERNEL_STACK_BASE + KERNEL_STACK_SIZE,
         rust_trampoline as usize,
-        page::phys2virt(gp).into(),
     )
 }
 
@@ -136,12 +137,9 @@ unsafe extern "C" fn entry_trampoline(
     _fdt: *const DeviceTree<'_>,
     _new_stack: usize,
     _dst: usize,
-    _gp: usize,
 ) -> ! {
     #[rustfmt::skip]
     asm!("
-        mv gp, a4
-
         mv t0, sp
         mv sp, a2
         mv t1, a2

@@ -53,7 +53,7 @@ impl FreeList {
                     vaddr,
                     size / PageSize::Megapage.size(),
                     PageSize::Megapage,
-                    Perm::READ | Perm::WRITE,
+                    Perm::READ | Perm::WRITE | Perm::DIRTY | Perm::ACCESSED,
                 )
                 .map_err(Error::Page)?;
 
@@ -152,7 +152,7 @@ impl VirtualAllocator {
                 vaddr,
                 size / PageSize::Megapage.size(),
                 PageSize::Megapage,
-                Perm::READ | Perm::WRITE,
+                Perm::READ | Perm::WRITE | Perm::DIRTY | Perm::ACCESSED,
             )
             .map_err(Error::Page)?;
 

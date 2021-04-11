@@ -7,7 +7,11 @@ struct PanicPrinter<'panic>(&'panic PanicInfo<'panic>);
 impl fmt::Display for PanicPrinter<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "=========================")?;
-        writeln!(f, "KERNEL PANIC ON HART {:3}", hart::current().id())?;
+        if let Some(ctx) = hart::try_current() {
+            writeln!(f, "KERNEL PANIC ON HART {:3}", ctx.id())?;
+        } else {
+            writeln!(f, "KERNEL PANIC",)?;
+        }
         writeln!(f, "=========================")?;
 
         match (self.0.location(), self.0.message()) {
@@ -29,7 +33,7 @@ impl fmt::Display for PanicPrinter<'_> {
 fn panic_handler(info: &PanicInfo<'_>) -> ! {
     log::error!("{}", PanicPrinter(info));
 
-    if hart::current().is_bsp() {
+    if hart::try_current().map_or(true, |c| c.is_bsp()) {
         sbi::system::fail_shutdown();
     } else {
         loop {

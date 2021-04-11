@@ -19,6 +19,21 @@ pub struct Satp {
     pub root_table: u64,
 }
 
+impl Satp {
+    /// Return the raw representation of this satp struct.
+    pub fn as_bits(&self) -> usize {
+        let bits = (self.root_table as usize >> 12) | ((self.asid as usize) << 44);
+
+        let mode = match self.mode {
+            Mode::Bare => 0,
+            Mode::Sv39 => 8,
+            Mode::Sv48 => 9,
+        };
+
+        bits | (mode << 60)
+    }
+}
+
 /// Read from the `satp` CSR.
 pub unsafe fn read() -> Satp {
     let bits = _read();
@@ -39,14 +54,5 @@ pub unsafe fn read() -> Satp {
 
 /// Write to the `satp` CSR.
 pub unsafe fn write(satp: Satp) {
-    let bits = (satp.root_table >> 12) | ((satp.asid as u64) << 44);
-
-    let mode = match satp.mode {
-        Mode::Bare => 0,
-        Mode::Sv39 => 8,
-        Mode::Sv48 => 9,
-    };
-
-    let bits = bits | (mode << 60);
-    _write(bits as usize)
+    _write(satp.as_bits())
 }

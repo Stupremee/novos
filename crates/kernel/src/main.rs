@@ -6,9 +6,9 @@
     naked_functions,
     panic_info_message,
     exclusive_range_pattern,
-    int_bits_const,
     alloc_error_handler,
-    allocator_api
+    allocator_api,
+    fn_align
 )]
 #![allow(clippy::missing_safety_doc, clippy::empty_loop)]
 
@@ -39,8 +39,10 @@ pub fn main(fdt: &DeviceTree<'_>) -> ! {
         hart::current().devices().init();
     }
 
-    // initialize the global logging system
-    log::init_log(GlobalLog).map_err(|_| ()).unwrap();
+    // initialize the global logging system, if there's a logging device available
+    if hart::current().devices().logger().is_some() {
+        log::init_log(GlobalLog).map_err(|_| ()).unwrap();
+    }
 
     // print the hello message with some statistics
     let cores = fdt.find_nodes("/cpus/cpu@").count();

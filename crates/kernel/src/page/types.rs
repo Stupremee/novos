@@ -94,6 +94,9 @@ impl Perm {
     pub const WRITE: Perm = Perm(0b010);
     pub const EXEC: Perm = Perm(0b100);
 
+    pub const ACCESSED: Perm = Perm(1 << 5);
+    pub const DIRTY: Perm = Perm(1 << 6);
+
     /// Check if this permission is readable.
     #[inline]
     pub fn read(self) -> bool {
@@ -139,7 +142,7 @@ impl fmt::Display for Perm {
 
 impl From<usize> for Perm {
     fn from(x: usize) -> Perm {
-        Perm((x & 0b111) as u8)
+        Perm((x & 0b1100_0111) as u8)
     }
 }
 
@@ -151,7 +154,7 @@ impl From<Perm> for usize {
 
 impl From<u8> for Perm {
     fn from(x: u8) -> Perm {
-        Perm(x & 0b111)
+        Perm(x & 0b1100_0111)
     }
 }
 

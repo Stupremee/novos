@@ -99,8 +99,7 @@ pub trait PageTable {
             riscv::asm::sfence(usize::from(vaddr), None);
 
             // deallocate the page
-            pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order)
-                .map_err(Error::Alloc)?;
+            pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order).map_err(Error::Alloc)?;
         }
 
         Ok(())
@@ -115,6 +114,12 @@ pub trait PageTable {
     /// Translate the virtual address and return the physical address it's pointing to, and the
     /// size of the mapped page.
     fn translate(&self, vaddr: VirtAddr) -> Option<(PhysAddr, PageSize)>;
+
+    /// Set the A bit of the PTE that is responsible for `vaddr`.
+    fn mark_accessed(&mut self, vaddr: VirtAddr);
+
+    /// Set the D bit of the PTE that is responsible for `vaddr`.
+    fn mark_dirty(&mut self, vaddr: VirtAddr);
 }
 
 /// Convert a physical address into a virtual address.
