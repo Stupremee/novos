@@ -11,6 +11,8 @@ use core::slice;
 use devicetree::DeviceTree;
 use riscv::{csr::satp, symbols};
 
+mod harts;
+
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
 /// The base virtual addresses where the stack for every hart is located.

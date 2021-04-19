@@ -1,3 +1,4 @@
+use crate::allocator::PAGE_SIZE;
 use crate::{allocator, vmem};
 use core::alloc::Layout;
 use core::ptr::NonNull;
@@ -6,9 +7,6 @@ use core::ptr::NonNull;
 pub const GROW_PAGES_COUNT: usize = 4;
 
 /// A slab holds a bunch of objects with a fixed size.
-///
-/// It will allocate new memory on the fly if there's no memory
-/// left in this slab.
 pub struct Slab {
     free_list: Option<NonNull<usize>>,
     // the size of each object inside this slab
@@ -24,16 +22,23 @@ impl Slab {
         }
     }
 
-    /// Grow this slab by allocating a bunch of physical memory and adding it to
-    /// this slab.
-    pub unsafe fn grow(&mut self, page: NonNull<u8>) -> Result<(), vmem::Error> {
-        let page = page.as_ptr() as usize;
-        let size = GROW_PAGES_COUNT * allocator::PAGE_SIZE;
+    /// Return the number of bytes each grow operation will add.
+    pub fn grow_size(&self) -> usize {
+        self.size.max(PAGE_SIZE) * GROW_PAGES_COUNT
+    }
 
-        // loop through every object that fits in the allocated memory
-        // and push it to this slab
-        for obj in (page..page + size).step_by(self.size) {
-            self.push(NonNull::new(obj as *mut _).unwrap());
+    /// Grow this slab by allocating a bunch of physical memory and adding it to
+    /// this slab. The size of `page` must be equal to the size returned by `grow_size`.
+    pub unsafe fn grow(&mut self, page: NonNull<u8>) -> Result<(), vmem::Error> {
+        let size = self.grow_size();
+        let start = page.as_ptr() as usize;
+
+        // go through each page and add it to this slab
+        for page in (start..start + size).step_by(self.size) {
+            self.push(
+                NonNull::new(page as *mut _)
+                    .ok_or(vmem::Error::Alloc(allocator::Error::NullPointer))?,
+            )
         }
 
         Ok(())
@@ -63,45 +68,41 @@ impl Slab {
     }
 }
 
-/// A pool of slabs that manages multiple slabs
-/// and allows to allocate / deallocate memory from all
-/// the slabs.
-pub struct SlabPool {
-    slab_32: Slab,
-    slab_64: Slab,
-    slab_128: Slab,
-    slab_256: Slab,
-    slab_512: Slab,
-    slab_1024: Slab,
-    slab_2048: Slab,
+macro_rules! gen_slab_pool {
+    ($($size:literal => $name:ident,)+) => {
+        /// A pool of slabs that manages multiple slabs
+        /// and allows to allocate / deallocate memory from all
+        /// the slabs.
+        pub struct SlabPool {
+            $($name: Slab,)+
+        }
+
+        impl SlabPool {
+            /// Construct an empty pool of slabs.
+            pub const fn new() -> Self {
+                Self {
+                    $($name: Slab::new($size),)+
+                }
+            }
+
+            /// Find a slab that is able to hold the given layout inside this slab pool.
+            pub fn slab_for_layout(&mut self, layout: Layout) -> Option<&mut Slab> {
+                let slab = match (layout.size(), layout.align()) {
+                    $((0..=$size, 0..=$size) => &mut self.$name,)+
+                    _ => return None,
+                };
+                Some(slab)
+            }
+        }
+    };
 }
 
-impl SlabPool {
-    /// Construct an empty pool of slabs.
-    pub const fn new() -> Self {
-        Self {
-            slab_32: Slab::new(32),
-            slab_64: Slab::new(64),
-            slab_128: Slab::new(128),
-            slab_256: Slab::new(256),
-            slab_512: Slab::new(512),
-            slab_1024: Slab::new(1024),
-            slab_2048: Slab::new(2048),
-        }
-    }
-
-    /// Find a slab that is able to hold the given layout inside this slab pool.
-    pub fn slab_for_layout(&mut self, layout: Layout) -> Option<&mut Slab> {
-        let slab = match (layout.size(), layout.align()) {
-            (0..=32, 0..=32) => &mut self.slab_32,
-            (0..=64, 0..=64) => &mut self.slab_64,
-            (0..=128, 0..=128) => &mut self.slab_128,
-            (0..=256, 0..=256) => &mut self.slab_256,
-            (0..=512, 0..=512) => &mut self.slab_512,
-            (0..=1024, 0..=1024) => &mut self.slab_1024,
-            (0..=2048, 0..=2048) => &mut self.slab_2048,
-            _ => return None,
-        };
-        Some(slab)
-    }
+gen_slab_pool! {
+    32 => slab_32,
+    64 => slab_64,
+    128 => slab_128,
+    256 => slab_256,
+    512 => slab_512,
+    1024 => slab_1024,
+    2048 => slab_2048,
 }

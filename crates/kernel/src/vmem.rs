@@ -122,7 +122,7 @@ impl VirtualAllocator {
             }
 
             // otherwise grow the slab and try again
-            let order = allocator::order_for_size(slab::GROW_PAGES_COUNT * PAGE_SIZE);
+            let order = allocator::order_for_size(slab.grow_size());
             let page = self.free_lists[order].pop()?;
             unsafe {
                 slab.grow(page)?;

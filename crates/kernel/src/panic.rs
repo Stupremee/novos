@@ -36,6 +36,10 @@ fn panic_handler(info: &PanicInfo<'_>) -> ! {
     if hart::try_current().map_or(true, |c| c.is_bsp()) {
         sbi::system::fail_shutdown();
     } else {
+        // try to stop this hart if it paniced
+        let _ = sbi::hsm::stop();
+
+        // if we can't stop this hart, just spin it
         loop {
             riscv::asm::wfi()
         }
