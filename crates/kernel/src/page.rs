@@ -8,6 +8,7 @@ pub mod sv39;
 
 use crate::boot::KERNEL_PHYS_MEM_BASE;
 use crate::{allocator, pmem};
+use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 
 displaydoc_lite::displaydoc! {
@@ -65,6 +66,7 @@ pub trait PageTable {
             // map the new page
             self.map(paddr, vaddr.into(), page_size, perm)?;
 
+            // flush tlb for this page
             riscv::asm::sfence(vaddr, None);
         }
 
@@ -94,6 +96,7 @@ pub trait PageTable {
             // unmap the page
             assert!(self.unmap(page.into())?);
 
+            // flush tlb for this page
             riscv::asm::sfence(usize::from(vaddr), None);
 
             // deallocate the page

@@ -9,17 +9,11 @@
 #![no_std]
 #![feature(asm, cfg_target_has_atomic, never_type)]
 
-// mod hart_mask;
-// mod interface;
-// pub use interface::ecall;
-
-// pub mod platform;
-// pub use platform::Platform;
-
 pub mod base;
 pub mod hsm;
 pub mod ipi;
 pub mod legacy;
+pub mod rfence;
 pub mod system;
 pub mod timer;
 
@@ -86,6 +80,26 @@ impl Error {
         match err_code {
             0 => Ok(value),
             code => Err(Error::from_code(code)),
+        }
+    }
+}
+
+/// Structure that is used to specify the targets for hart-crossing SBI calls.
+///
+/// It consists of a mask, where each bit represents the hart with id `base + bit_idx`,
+/// and a base, which sets the base hart id.
+#[derive(Debug)]
+pub struct HartMask {
+    pub(crate) base: u64,
+    pub(crate) mask: u64,
+}
+
+impl HartMask {
+    /// Create a hart mask which targets all harts with id `base ..= base + 64`
+    pub fn all_from_base(base: u64) -> Self {
+        Self {
+            base,
+            mask: u64::max_value(),
         }
     }
 }

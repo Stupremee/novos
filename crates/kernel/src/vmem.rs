@@ -5,12 +5,13 @@ mod vaddr;
 use crate::allocator::slab::SlabPool;
 use crate::page::{PageSize, PageTable, Perm};
 use crate::{
-    allocator::{self, buddy::MAX_ORDER, slab, PAGE_SIZE},
+    allocator::{self, buddy::MAX_ORDER},
     page, unit,
 };
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
 use riscv::sync::Mutex;
+use sbi::HartMask;
 
 displaydoc_lite::displaydoc! {
     /// Any error that can happen while allocating or deallocating virtual memory.
@@ -20,6 +21,8 @@ displaydoc_lite::displaydoc! {
         Alloc(allocator::Error),
         /// {_0}
         Page(page::Error),
+        /// {_0:?}
+        Sbi(sbi::Error),
     }
 }
 
@@ -56,6 +59,10 @@ impl FreeList {
                     Perm::READ | Perm::WRITE | Perm::DIRTY | Perm::ACCESSED,
                 )
                 .map_err(Error::Page)?;
+
+            // flush the tlbs on all other harts
+            sbi::rfence::sfence_vma(HartMask::all_from_base(0), vaddr.into(), size)
+                .map_err(Error::Sbi)?;
 
             // push the new allocated page to this linked list
             unsafe {
@@ -156,6 +163,10 @@ impl VirtualAllocator {
             )
             .map_err(Error::Page)?;
 
+        // flush the tlbs on all other harts
+        sbi::rfence::sfence_vma(HartMask::all_from_base(0), vaddr.into(), size)
+            .map_err(Error::Sbi)?;
+
         // return the fresh allocated memory
         Ok(NonNull::new(vaddr.as_ptr()).unwrap())
     }
@@ -190,6 +201,10 @@ impl VirtualAllocator {
         page::root()
             .free(ptr.as_ptr().into(), size / PageSize::Megapage.size())
             .map_err(Error::Page)?;
+
+        // flush the tlbs on all other harts
+        sbi::rfence::sfence_vma(HartMask::all_from_base(0), ptr.as_ptr() as usize, size)
+            .map_err(Error::Sbi)?;
 
         // tell the vaddr allocator that the address is free to use again
         vaddr::global().free_vaddr(ptr.as_ptr().into(), size / PageSize::Megapage.size());
