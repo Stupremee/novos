@@ -182,6 +182,9 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
     hart::init_hart_context(hart_id as u64, true, devices).unwrap();
     hart::init_hart_local_storage().unwrap();
 
+    // boot up the other harts
+    harts::boot_all_harts(hart_id, fdt);
+
     // jump into safe rust code
     crate::main(fdt)
 }

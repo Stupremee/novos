@@ -8,7 +8,6 @@ pub mod sv39;
 
 use crate::boot::KERNEL_PHYS_MEM_BASE;
 use crate::{allocator, pmem};
-use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 
 displaydoc_lite::displaydoc! {

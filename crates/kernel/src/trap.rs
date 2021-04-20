@@ -70,13 +70,10 @@ pub extern "C" fn trap_handler(
 /// The global trap handler that will save the registers and then
 /// jump to the rist code.
 #[naked]
+#[repr(align(4))]
 unsafe extern "C" fn _trap_handler() -> ! {
     asm!(
         "
-        // The trap handler must be aligned to 4, because
-        // the lower two bits must be zero
-        .align 4
-    
         // We don't want nested interrupts, so disable them
         csrci sstatus, 2
 
