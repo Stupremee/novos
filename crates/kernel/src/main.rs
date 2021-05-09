@@ -54,23 +54,27 @@ pub fn main(fdt: &DeviceTree<'_>) -> ! {
         unit::bytes(pmem::alloc_stats().total),
     );
 
-    log_core_online(fdt);
+    log_core_online();
 
-    loop {
-        riscv::asm::wfi();
-    }
+    sbi::system::shutdown();
+    //loop {
+    //riscv::asm::wfi();
+    //}
 }
 
 /// The entrypoint for all other harts.
 pub fn hmain() -> ! {
+    log_core_online();
+
     loop {
         riscv::asm::wfi();
     }
 }
 
-fn log_core_online(fdt: &DeviceTree<'_>) {
+fn log_core_online() {
     // get a human readable representation of the ISA
-    let node = fdt
+    let node = hart::current()
+        .fdt()
         .cpus()
         .children()
         .find(|node| node.unit_address() == Some(hart::current().id()));
@@ -105,8 +109,21 @@ fn log_core_online(fdt: &DeviceTree<'_>) {
         Err(_) => "Error",
     };
 
+    struct PrintCore;
+    impl fmt::Display for PrintCore {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if hart::current().is_bsp() {
+                use owo_colors::OwoColorize;
+                write!(f, "{} ", "Physical Core".red())
+            } else {
+                f.write_str("Physical Core ")
+            }
+        }
+    }
+
     log::info!(
-        "Physical Core {} ({} on {}) online",
+        "{} {} ({} on {}) online",
+        PrintCore,
         hart::current().id().green(),
         isa.magenta(),
         arch.blue(),

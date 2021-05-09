@@ -1,7 +1,7 @@
 # vim:ft=toml
 
 [toolchain]
-channel = "nightly-2021-04-10"
+channel = "nightly-2021-05-08"
 profile = "minimal"
 components = ["rust-src", "clippy"]
 targets = ["riscv64gc-unknown-none-elf"]

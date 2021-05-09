@@ -6,6 +6,7 @@ use alloc::boxed::Box;
 use alloc::vec;
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
+use devicetree::DeviceTree;
 
 /// The size of each trap stack.
 pub const TRAP_STACK_SIZE: usize = 4 * unit::KIB;
@@ -24,6 +25,7 @@ pub struct HartContext {
     temp_sp: usize,
     /// Bool indicating if this hart was the booting hart.
     is_bsp: bool,
+    fdt: &'static DeviceTree<'static>,
     devices: &'static DeviceManager,
 }
 
@@ -44,6 +46,12 @@ impl HartContext {
     #[inline]
     pub fn devices(&self) -> &'static DeviceManager {
         self.devices
+    }
+
+    /// Get access to the global devicetree.
+    #[inline]
+    pub fn fdt(&self) -> &'static DeviceTree<'static> {
+        self.fdt
     }
 
     /// Get the PLIC context for the current hart.
@@ -76,6 +84,7 @@ pub unsafe fn init_hart_context(
     hart_id: u64,
     is_bsp: bool,
     devices: &'static DeviceManager,
+    fdt: &'static DeviceTree<'static>,
 ) -> Result<(), allocator::Error> {
     // allocate the trap stack
     let mut stack = ManuallyDrop::new(vec![0u8; TRAP_STACK_SIZE]);
@@ -87,6 +96,7 @@ pub unsafe fn init_hart_context(
         temp_sp: 0,
         is_bsp,
         devices,
+        fdt,
     };
 
     // box up the context so it's stored on the heap

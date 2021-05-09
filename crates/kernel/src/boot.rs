@@ -1,9 +1,9 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
-use crate::allocator::{order_for_size, size_for_order, PAGE_SIZE};
+use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
     drivers, hart,
-    page::{self, PageSize, PageTable, Perm},
+    page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
     pmem, trap, unit, StaticCell,
 };
 use alloc::boxed::Box;
@@ -35,6 +35,37 @@ impl log::Logger for SbiLogger {
         let _ = x.chars().try_for_each(sbi::legacy::put_char);
         Ok(())
     }
+}
+
+/// Allocates the stack for a hart, with the given id and returns the end address
+/// of the new stack.
+///
+/// Returns both, the physical and virtual address to the end of the stack.
+pub(self) fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (PhysAddr, VirtAddr) {
+    // calculate the start address for hart `id`s stack
+    let start = KERNEL_STACK_BASE + id as usize * KERNEL_STACK_SIZE;
+
+    // allocate the backing physmem
+    let stack = pmem::alloc_order(allocator::order_for_size(KERNEL_STACK_SIZE))
+        .unwrap()
+        .as_ptr();
+
+    // allocate the new stack
+    for off in (0..KERNEL_STACK_SIZE).step_by(PAGE_SIZE) {
+        table
+            .map(
+                unsafe { stack.add(off) }.into(),
+                (start + off).into(),
+                PageSize::Kilopage,
+                Perm::READ | Perm::WRITE | Perm::ACCESSED | Perm::DIRTY,
+            )
+            .unwrap();
+    }
+
+    (
+        PhysAddr::from(stack as usize + KERNEL_STACK_SIZE),
+        VirtAddr::from(start + KERNEL_STACK_SIZE),
+    )
 }
 
 /// The code that sets up memory stuff,
@@ -103,14 +134,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
 
     // allocate the stack for this hart
-    table
-        .map_alloc(
-            KERNEL_STACK_BASE.into(),
-            KERNEL_STACK_SIZE / PAGE_SIZE,
-            PageSize::Kilopage,
-            Perm::READ | Perm::WRITE | Perm::ACCESSED | Perm::DIRTY,
-        )
-        .unwrap();
+    let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
 
     // enable paging
     satp::write(satp::Satp {
@@ -127,7 +151,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     entry_trampoline(
         hart_id,
         page::phys2virt(&fdt as *const _).as_ptr(),
-        KERNEL_STACK_BASE + KERNEL_STACK_SIZE,
+        stack.into(),
         rust_trampoline as usize,
     )
 }
@@ -171,7 +195,7 @@ unsafe extern "C" fn entry_trampoline(
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`.
 ///
 /// This function also brings up the other harts.
-unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! {
+unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &'static DeviceTree<'static>) -> ! {
     // install the interrupt handler
     trap::install_handler();
 
@@ -179,11 +203,12 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &DeviceTree<'_>) -> ! 
     let devices = Box::leak(Box::new(drivers::DeviceManager::from_devicetree(fdt)));
 
     // initialize hart local storage and hart context
-    hart::init_hart_context(hart_id as u64, true, devices).unwrap();
+    hart::init_hart_context(hart_id as u64, true, devices, fdt).unwrap();
     hart::init_hart_local_storage().unwrap();
 
     // boot up the other harts
-    harts::boot_all_harts(hart_id, fdt);
+    let table = &mut *PAGE_TABLE.get();
+    harts::boot_all_harts(hart_id, fdt, table);
 
     // jump into safe rust code
     crate::main(fdt)
