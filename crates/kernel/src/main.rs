@@ -56,6 +56,31 @@ pub fn main(fdt: &DeviceTree<'_>) -> ! {
 
     log_core_online();
 
+    const ROUNDS: u64 = 1_00_0000;
+    log::debug!("{}", pmem::alloc_stats());
+
+    let mut allocated = 0u64;
+    let start = riscv::asm::time();
+    for _ in 0..ROUNDS {
+        unsafe {
+            let orig_page = pmem::alloc().unwrap();
+            let page = page::phys2virt(orig_page.as_ptr());
+            core::ptr::write_volatile(page.as_ptr::<u8>(), 123u8);
+            pmem::free(orig_page).unwrap();
+        }
+        allocated += 1;
+    }
+
+    let elapsed = riscv::asm::time() - start;
+    let rate = ROUNDS / elapsed.as_secs();
+    log::info!(
+        "Allocated and freed {} pages in {:?}: {} pages / sec",
+        allocated,
+        elapsed,
+        rate
+    );
+    log::debug!("{}", pmem::alloc_stats());
+
     sbi::system::shutdown();
     //loop {
     //riscv::asm::wfi();

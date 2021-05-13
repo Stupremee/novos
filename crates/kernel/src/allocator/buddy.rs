@@ -197,7 +197,17 @@ impl BuddyAllocator {
 
             // ...and then go to the next level and merge both buddies
             let new_block = cmp::min(buddy_addr.cast(), block);
-            self.deallocate(new_block, order + 1)?;
+
+            // if we are at the last order, just push all blocks to it
+            let new_order = order + 1;
+            if new_order >= MAX_ORDER {
+                self.order_push(order, buddy_addr.cast());
+                self.order_push(order, block.cast());
+
+                self.dealloc_stats(size * 2);
+            } else {
+                self.deallocate(new_block, new_order)?;
+            }
         } else {
             // if the buddy is not free, just insert the block to deallocate
             // into the free-list
@@ -244,7 +254,10 @@ impl BuddyAllocator {
     ///
     /// Returns whether the remove was successful.
     fn order_remove(&mut self, order: usize, to_remove: NonNull<ListNode>) -> bool {
-        let mut cur: *mut Option<NonNull<ListNode>> = &mut self.orders[order];
+        let mut cur: *mut Option<NonNull<ListNode>> = match self.orders.get_mut(order) {
+            Some(cur) => cur,
+            None => return false,
+        };
 
         // walk through the linked list
         while let Some(ptr) = unsafe { *cur } {
