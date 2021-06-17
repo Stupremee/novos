@@ -1,8 +1,11 @@
+cargo-features = ["per-package-target"]
+
 [package]
 name = "log"
 version = "0.1.0"
 authors = ["Justus K <justus.k@protonmail.com>"]
 edition = "2018"
+forced-target = "riscv64gc-unknown-none-elf"
 
 [dependencies]
 riscv = { path = "../riscv" }

@@ -141,11 +141,10 @@ fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
 
 /// Build the kernel
 fn build(no_release: bool, spike: bool) -> Result<()> {
-    let _flags = xshell::pushenv("RUSTFLAGS", "-Clink-arg=-Tcrates/kernel/lds/qemu.lds");
     let release = if no_release { &[][..] } else { &["--release"] };
 
     cmd!(
-        "cargo build --target riscv64gc-unknown-none-elf -Zbuild-std=core,alloc -p kernel {release...}"
+        "cargo build -p kernel {release...}"
     )
     .run()?;
 
