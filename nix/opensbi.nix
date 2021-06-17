@@ -3,21 +3,25 @@
 #
 # platform/fw_{dynamic,jump,payload}.elf
 
-{ platform ? "generic", pkgs ? import <nixpkgs> { crossSystem.config = "riscv64-none-elf"; } }:
+{ platform ? "generic", pkgs }:
 let
   inherit (pkgs) stdenv fetchFromGitHub;
 
   version = "master";
-in stdenv.mkDerivation rec {
+in
+stdenv.mkDerivation rec {
   name = "opensbi";
   inherit version;
 
   src = fetchFromGitHub {
     owner = "riscv";
     repo = name;
-    rev = "50d4fde1c5a4ceb063d7f9a402769fb5be6d59ad";
-    sha256 = "sha256-RjxtcbxpK3ow1Xp2lA5ygA5EsxyOFt0LixEmYcPMWMs=";
+    rev = "79f9b4220ffa7f74356054be25d450d7958bf16c";
+    sha256 = "sha256-otbS2IXsVitjfWXf6XcPxLS2R3o2ZplcGrjo3HFXI1A=";
   };
+
+  # If this is yes, then there's a gcc error about `-fPIC` not being valid
+  FW_PIC = "n";
 
   PLATFORM = platform;
   installPhase = ''

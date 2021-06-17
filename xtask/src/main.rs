@@ -81,6 +81,10 @@ fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
         "target/riscv64gc-unknown-none-elf/release/kernel".to_string()
     };
 
+    let mut opensbi = PathBuf::from(std::env::var("OPENSBI")?);
+    opensbi.push("platform");
+    opensbi.push("fw_jump.elf");
+
     if spike {
         path += ".bin";
     }
@@ -109,7 +113,7 @@ fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
                 -m{ram}
                 --kernel={path}
                 {gdb...}
-                result/platform/fw_jump.elf
+                {opensbi}
         "
         )
         .into();
@@ -123,7 +127,7 @@ fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
                 -smp {cpus}
                 -m {ram}M
                 -nographic
-                -bios result/platform/fw_jump.bin
+                -bios {opensbi}
                 -kernel {path}
                 {gdb...}
                 {debug...}
