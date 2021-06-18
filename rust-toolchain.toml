@@ -1,5 +1,5 @@
 [toolchain]
 channel = "nightly-2021-06-15"
 profile = "minimal"
-components = ["rust-src", "clippy"]
+components = ["rust-src", "clippy", "rustfmt"]
 targets = ["riscv64gc-unknown-none-elf"]

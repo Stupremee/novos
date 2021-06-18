@@ -1,5 +1,7 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
+mod harts;
+
 use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
     drivers, hart,
@@ -10,8 +12,6 @@ use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
 use riscv::{csr::satp, symbols};
-
-mod harts;
 
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
@@ -129,7 +129,6 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     map_section(symbols::text_range(), Perm::READ | Perm::EXEC);
     map_section(symbols::rodata_range(), Perm::READ);
     map_section(symbols::data_range(), Perm::READ | Perm::WRITE);
-    map_section(symbols::tdata_range(), Perm::READ | Perm::WRITE);
     map_section(symbols::bss_range(), Perm::READ | Perm::WRITE);
     map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
 

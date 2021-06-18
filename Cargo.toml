@@ -13,3 +13,7 @@ debug = true
 lto = "fat"
 overflow-checks = true
 debug-assertions = true
+
+[profile.dev]
+# Somehow this is required to not fail linking
+lto = "fat"
