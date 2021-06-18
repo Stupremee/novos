@@ -2,5 +2,5 @@
 xtask = "run -p xtask --target x86_64-unknown-linux-gnu --"
 
 [target.riscv64gc-unknown-none-elf]
-#rustflags = ["-Clink-args=--pie -Tcrates/kernel/lds/link.lds", "-Crelocation-model=pic"]
-rustflags = ["-Clink-arg=-Tcrates/kernel/lds/link.lds"]
+rustflags = ["-Clink-args=--pie -Tcrates/kernel/lds/link.lds", "-Crelocation-model=pic"]
+#rustflags = ["-Clink-arg=-Tcrates/kernel/lds/link.lds"]

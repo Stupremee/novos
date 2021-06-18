@@ -1,5 +1,25 @@
 //! Linker symbols
 
+use crate::StaticCell;
+
+/// The start address where everything is linked to.
+///
+/// Keep in sync with number in linker script.
+pub const LINK_START: usize = 0x8020_0000;
+
+/// The address where the kernel is laoded at.
+static LOAD_START: StaticCell<usize> = StaticCell::new(LINK_START);
+
+/// Get the address at which the kernel is loaded.
+pub fn load_start() -> usize {
+    unsafe { *LOAD_START.get() }
+}
+
+/// Set the address at which the kernel is loaded.
+pub unsafe fn set_load_start(x: usize) {
+    LOAD_START.get().write(x);
+}
+
 macro_rules! linker_section {
     ($fn:ident, $start:ident, $end:ident) => {
         pub fn $fn() -> (*mut u8, *mut u8) {
@@ -8,7 +28,12 @@ macro_rules! linker_section {
                 static mut $end: Symbol;
             }
 
-            unsafe { ($start.ptr(), $end.ptr()) }
+            unsafe {
+                (
+                    $start.ptr().add(load_start() - LINK_START),
+                    $end.ptr().add(load_start() - LINK_START),
+                )
+            }
         }
     };
 }

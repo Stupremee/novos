@@ -143,10 +143,7 @@ fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
 fn build(no_release: bool, spike: bool) -> Result<()> {
     let release = if no_release { &[][..] } else { &["--release"] };
 
-    cmd!(
-        "cargo build -p kernel {release...}"
-    )
-    .run()?;
+    cmd!("cargo build -p kernel {release...}").run()?;
 
     let path = if no_release {
         "target/riscv64gc-unknown-none-elf/debug/kernel"
@@ -155,7 +152,7 @@ fn build(no_release: bool, spike: bool) -> Result<()> {
     };
 
     if spike {
-        cmd!("llvm-objcopy --set-start=0x80200000 -O binary {path} {path}.bin").run()?;
+        cmd!("llvm-objcopy -O binary {path} {path}.bin").run()?;
     }
     Ok(())
 }

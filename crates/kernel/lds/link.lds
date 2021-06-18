@@ -134,7 +134,8 @@ SECTIONS
   . += 0x2000;
   PROVIDE(__stack_end = .);
 
-  PROVIDE(__kernel_end = ALIGN(0x1000));
+  . = ALIGN(0x1000);
+  PROVIDE(__kernel_end = .);
 
   /DISCARD/ : { *(.eh_frame_hdr .eh_frame) }
 }
