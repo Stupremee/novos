@@ -5,13 +5,8 @@ use crate::symbols;
 mod elf {
     pub const DT_NULL: isize = 0;
     pub const DT_RELA: isize = 7;
-    pub const DT_RELASZ: isize = 8;
     pub const DT_RELAENT: isize = 9;
     pub const DT_RELACOUNT: isize = 0x6ffffff9;
-    pub const DT_REL: isize = 17;
-    pub const DT_RELSZ: isize = 18;
-    pub const DT_RELENT: isize = 19;
-    pub const DT_RELCOUNT: isize = 0x6ffffffa;
 
     pub const R_RISCV_RELATIVE: usize = 3;
 
@@ -19,12 +14,6 @@ mod elf {
     pub struct Dyn {
         pub tag: isize,
         pub val: usize,
-    }
-
-    #[repr(C)]
-    pub struct Rel {
-        pub offset: usize,
-        pub info: usize,
     }
 
     #[repr(C)]
