@@ -13,17 +13,12 @@ use crate::page;
 use devicetree::DeviceTree;
 use riscv::sync::Mutex;
 
-displaydoc_lite::displaydoc! {
-    /// Any error that is related to physical memory.
-    #[derive(Debug)]
-    pub enum Error {
-        /// {_0}
-        RangeSet(rangeset::Error),
-        /// {_0}
-        Alloc(allocator::Error),
-        /// memory region starts at address 0
-        NullRegion,
-    }
+/// Any error that is related to physical memory.
+#[derive(Debug)]
+pub enum Error {
+    RangeSet(rangeset::Error),
+    Alloc(allocator::Error),
+    NullRegion,
 }
 
 /// Initialize the global physical memory allocator by adding all regions specified
@@ -113,7 +108,7 @@ unsafe impl Allocator for PhysicalAllocator {
             }
             Err(err) => {
                 log::warn!(
-                    "{} to allocate physical memory (order: {}): {}",
+                    "{} to allocate physical memory (order: {}): {:?}",
                     "Failed".yellow(),
                     order,
                     err
@@ -124,8 +119,6 @@ unsafe impl Allocator for PhysicalAllocator {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        use page::PageTable;
-
         // get the order for the requested size
         let order = allocator::order_for_size(layout.size());
         let (ptr, _) = page::root().translate(ptr.as_ptr().into()).unwrap();
@@ -139,7 +132,7 @@ unsafe impl Allocator for PhysicalAllocator {
             Ok(()) => {}
             Err(err) => {
                 log::warn!(
-                    "{} to free physical memory (order: {}): {}",
+                    "{} to free physical memory (order: {}): {:?}",
                     "Failed".yellow(),
                     order,
                     err
@@ -205,12 +198,24 @@ pub unsafe fn free_order(ptr: NonNull<u8>, order: usize) -> Result<(), allocator
     PHYS_MEM.0.lock().deallocate(ptr, order)
 }
 
-/// Get access to the global physmem allocator.
-pub fn phys_alloc() -> &'static PhysicalAllocator {
-    &PHYS_MEM
-}
-
 /// Return the statistics of the global physmem allocator.
 pub fn alloc_stats() -> allocator::AllocStats {
     PHYS_MEM.0.lock().stats()
+}
+
+/// Empty struct that can be used as an [`Allocator`], which will allocate from the global physical
+/// memory allocator.
+pub struct GlobalPhysicalAllocator;
+
+unsafe impl Send for GlobalPhysicalAllocator {}
+unsafe impl Sync for GlobalPhysicalAllocator {}
+
+unsafe impl Allocator for GlobalPhysicalAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        PHYS_MEM.allocate(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        PHYS_MEM.deallocate(ptr, layout)
+    }
 }

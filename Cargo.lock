@@ -9,30 +9,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28b2cd92db5cbd74e8e5028f7e27dd7aa3090e89e4f2a197cc7c8dfb69c7063b"
 
 [[package]]
+name = "bitflags"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
+
+[[package]]
 name = "devicetree"
 version = "0.1.0"
-
-[[package]]
-name = "displaydoc-lite"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be9e85bc15c38db473be966e6fbf22e77e0c6514d604ffa9a868ecd61129148a"
-dependencies = [
- "displaydoc-lite-proc_macros",
-]
-
-[[package]]
-name = "displaydoc-lite-proc_macros"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b14d536c1ff7b71910b6672849230d8123ca882e4fcd61c7e50aab19aa09edba"
 
 [[package]]
 name = "kernel"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "devicetree",
- "displaydoc-lite",
  "log",
  "owo-colors",
  "riscv",

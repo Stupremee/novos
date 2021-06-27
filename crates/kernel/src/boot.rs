@@ -3,7 +3,7 @@
 use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
     drivers, hart,
-    page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
+    page::{self, Flags, KernelPageTable, PageSize, PhysAddr, VirtAddr},
     pmem, symbols, trap, unit, StaticCell,
 };
 use alloc::boxed::Box;
@@ -13,7 +13,7 @@ use riscv::csr::satp;
 
 mod harts;
 
-static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
+//static PAGE_TABLE: StaticCell<KernelPageTable> = StaticCell::new(KernelPageTable::new());
 
 /// The base virtual addresses where the stack for every hart is located.
 pub const KERNEL_STACK_BASE: usize = 0x001D_DD00_0000;
@@ -41,7 +41,7 @@ impl log::Logger for SbiLogger {
 /// of the new stack.
 ///
 /// Returns both, the physical and virtual address to the end of the stack.
-pub(self) fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (PhysAddr, VirtAddr) {
+pub(self) fn alloc_kernel_stack(table: &mut KernelPageTable, id: u64) -> (PhysAddr, VirtAddr) {
     // calculate the start address for hart `id`s stack
     let start = KERNEL_STACK_BASE + id as usize * KERNEL_STACK_SIZE;
 
@@ -57,7 +57,7 @@ pub(self) fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (Phys
                 unsafe { stack.add(off) }.into(),
                 (start + off).into(),
                 PageSize::Kilopage,
-                Perm::READ | Perm::WRITE | Perm::ACCESSED | Perm::DIRTY,
+                Flags::READ | Flags::WRITE | Flags::ACCESSED | Flags::DIRTY,
             )
             .unwrap();
     }
@@ -83,8 +83,21 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
 
+    let mut table = KernelPageTable::new();
+    table
+        .map(
+            0x1000_0000.into(),
+            0x1020_0000.into(),
+            PageSize::Megapage,
+            Flags::READ,
+        )
+        .unwrap();
+    log::debug!("{:?}", table.debug());
+
+    sbi::system::shutdown();
+
     // get access to the global page table
-    let table = &mut *PAGE_TABLE.get();
+    let table: &mut KernelPageTable = todo!();
 
     // copy the devicetree to a newly allocated physical page
     let fdt_order = order_for_size(fdt.total_size() as usize);
@@ -107,35 +120,35 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
                 page.into(),
                 vaddr.into(),
                 PageSize::Megapage,
-                Perm::READ | Perm::WRITE | Perm::ACCESSED | Perm::DIRTY,
+                Flags::READ | Flags::WRITE | Flags::ACCESSED | Flags::DIRTY,
             )
             .unwrap();
     }
 
     // map the kernel sections
-    let mut map_section = |(start, end): (*mut u8, *mut u8), perm: Perm| {
+    let mut map_section = |(start, end): (*mut u8, *mut u8), perm: Flags| {
         for page in (start as usize..end as usize).step_by(PAGE_SIZE) {
             table
                 .map(
                     page.into(),
                     page.into(),
                     PageSize::Kilopage,
-                    perm | Perm::ACCESSED | Perm::DIRTY,
+                    perm | Flags::ACCESSED | Flags::DIRTY,
                 )
                 .unwrap();
         }
     };
 
-    //map_section(symbols::text_range(), Perm::READ | Perm::EXEC);
-    //map_section(symbols::rodata_range(), Perm::READ);
-    //map_section(symbols::data_range(), Perm::READ | Perm::WRITE);
-    //map_section(symbols::tdata_range(), Perm::READ | Perm::WRITE);
-    //map_section(symbols::bss_range(), Perm::READ | Perm::WRITE);
-    //map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
+    //map_section(symbols::text_range(), Flags::READ | Flags::EXEC);
+    //map_section(symbols::rodata_range(), Flags::READ);
+    //map_section(symbols::data_range(), Flags::READ | Flags::WRITE);
+    //map_section(symbols::tdata_range(), Flags::READ | Flags::WRITE);
+    //map_section(symbols::bss_range(), Flags::READ | Flags::WRITE);
+    //map_section(symbols::stack_range(), Flags::READ | Flags::WRITE);
     // FIXME: Link and map sections properly!
     map_section(
         symbols::kernel_range(),
-        Perm::READ | Perm::WRITE | Perm::EXEC,
+        Flags::READ | Flags::WRITE | Flags::EXEC,
     );
 
     // allocate the stack for this hart
@@ -212,7 +225,7 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &'static DeviceTree<'s
     hart::init_hart_local_storage().unwrap();
 
     // boot up the other harts
-    let table = &mut *PAGE_TABLE.get();
+    let table: &mut KernelPageTable = todo!();
     harts::boot_all_harts(hart_id, fdt, table);
 
     // jump into safe rust code
@@ -248,30 +261,30 @@ unsafe extern "C" fn _boot() -> ! {
             lla t0, __rel_dyn_start
             lla t1, __rel_dyn_end
 
-            beq t0, t1, _relocate_done
-            j 5f
+            beq t0, t1, 4f
+            j 2f
 
-        2:
+        1:
             ld t5, -16(t0)
             li t3, 3
-            bne t3, t5, _loop
+            bne t3, t5, 3f
             ld t3, -24(t0) 
             ld t5, -8(t0) 
             add t5, t5, t2
             add t3, t3, t2
             sd t5, 0(t3)
-            j 5f
+            j 2f
 
-        5:
+        2:
             addi t0, t0, 8 * 3
-            ble t0, t1, 2b
-            j _relocate_done
+            ble t0, t1, 1b
+            j 4f
 
-        _loop:
-            j _loop
+        3:
+            # An error occurred. For now we are just looping
+            j 3b
 
-        _relocate_done:
-
+        4:
             # Zero bss section
             la t0, __bss_start
             la t1, __bss_end

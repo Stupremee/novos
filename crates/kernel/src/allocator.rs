@@ -10,7 +10,6 @@ pub mod slab;
 
 use crate::unit;
 use core::fmt;
-use displaydoc_lite::displaydoc;
 
 /// The size of a single page in memory.
 ///
@@ -26,27 +25,25 @@ pub fn align_up(addr: usize, align: usize) -> usize {
     (addr + align - 1) & !(align - 1)
 }
 
-displaydoc! {
-    /// Any error that can happen while allocating or deallocating memory.
-    #[derive(Debug)]
-    pub enum Error {
-        /// region was too small
-        RegionTooSmall,
-        /// the `end` pointer of a memory region was before the `start` pointer
-        InvalidRegion,
-        /// order exceeded the maximum order
-        OrderTooLarge,
-        /// no free memory left
-        NoMemoryAvailable,
-        /// can't allocate zero pages
-        AllocateZeroPages,
-        /// this is not a real error and should never be thrown somewhere
-        NoSlabForLayout,
-        /// `NonNull` was null
-        ///
-        /// Mostly just a safety mechanism to avoid UB.
-        NullPointer,
-    }
+/// Any error that can happen while allocating or deallocating memory.
+#[derive(Debug)]
+pub enum Error {
+    /// region was too small
+    RegionTooSmall,
+    /// the `end` pointer of a memory region was before the `start` pointer
+    InvalidRegion,
+    /// order exceeded the maximum order
+    OrderTooLarge,
+    /// no free memory left
+    NoMemoryAvailable,
+    /// can't allocate zero pages
+    AllocateZeroPages,
+    /// this is not a real error and should never be thrown somewhere
+    NoSlabForLayout,
+    /// `NonNull` was null
+    ///
+    /// Mostly just a safety mechanism to avoid UB.
+    NullPointer,
 }
 
 /// Statistics for a memory allocator.

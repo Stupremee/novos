@@ -11,6 +11,6 @@ devicetree = { path = "../devicetree" }
 riscv = { path = "../riscv" }
 log = { path = "../log" }
 sbi = { path = "../sbi" }
-displaydoc-lite = "0.1"
 owo-colors = "1.3"
 voladdress = "0.4"
+bitflags = "1"

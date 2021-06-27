@@ -2,7 +2,7 @@ pub mod ns16550a;
 pub mod plic;
 
 use crate::hart;
-use crate::page::{self, PageSize, PageTable, Perm};
+use crate::page::{self, Flags, PageSize};
 use alloc::boxed::Box;
 use devicetree::{node::Node, DeviceTree};
 use plic::ClaimGuard;
@@ -125,14 +125,14 @@ impl DeviceManager {
                         page.into(),
                         page.into(),
                         PageSize::Kilopage,
-                        Perm::READ | Perm::WRITE,
+                        Flags::READ | Flags::WRITE,
                     );
 
                     match res {
                         Ok(()) => {}
                         Err(err) => {
                             log::warn!(
-                                "{} to map MMIO space for {}: {}. Skipping device...",
+                                "{} to map MMIO space for {}: {:?}. Skipping device...",
                                 "Failed".yellow(),
                                 node.name(),
                                 err

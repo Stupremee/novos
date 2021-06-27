@@ -1,7 +1,6 @@
-use crate::allocator::PAGE_SIZE;
 use crate::boot::KERNEL_VMEM_ALLOC_BASE;
 use crate::page::{PageSize, VirtAddr};
-use crate::pmem::{self, PhysicalAllocator};
+use crate::pmem::GlobalPhysicalAllocator;
 use alloc::vec::Vec;
 use riscv::sync::{Mutex, MutexGuard};
 
@@ -19,7 +18,7 @@ static VADDR_ALLOC: Mutex<VirtualAddressAllocator> =
 pub struct VirtualAddressAllocator {
     // the bitmap stores a bit for each page, indicating if it's used or free.
     // there must be a bit for every page until `head`
-    bitmap: Option<Vec<u64, &'static PhysicalAllocator>>,
+    bitmap: Vec<u64, GlobalPhysicalAllocator>,
     // the start address of the vaddr allocator
     start: usize,
 }
@@ -28,7 +27,7 @@ impl VirtualAddressAllocator {
     /// Create a new vaddr allocator that starts at the given address.
     pub const fn new(start: usize) -> Self {
         Self {
-            bitmap: None,
+            bitmap: Vec::new_in(GlobalPhysicalAllocator),
             start,
         }
     }
@@ -135,12 +134,8 @@ impl VirtualAddressAllocator {
     }
 
     #[inline]
-    fn bitmap(&mut self) -> &mut Vec<u64, &'static PhysicalAllocator> {
-        self.bitmap.get_or_insert_with(|| {
-            let mut bitmap = Vec::with_capacity_in(PAGE_SIZE, pmem::phys_alloc());
-            bitmap.resize(PAGE_SIZE, 0);
-            bitmap
-        })
+    fn bitmap(&mut self) -> &mut Vec<u64, GlobalPhysicalAllocator> {
+        &mut self.bitmap
     }
 }
 

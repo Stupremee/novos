@@ -1,6 +1,6 @@
 //! Code to bringup all secondary harts.
 
-use crate::{drivers::DeviceManager, hart, page::sv39};
+use crate::{drivers::DeviceManager, hart, page::KernelPageTable};
 use devicetree::DeviceTree;
 use riscv::csr::satp;
 
@@ -11,12 +11,16 @@ struct HartArgs {
 }
 
 /// Boot all harts that are present in the given devicetree.
-pub(super) unsafe fn boot_all_harts(hart_id: usize, fdt: &DeviceTree<'_>, table: &mut sv39::Table) {
+pub(super) unsafe fn boot_all_harts(
+    hart_id: usize,
+    fdt: &DeviceTree<'_>,
+    table: &mut KernelPageTable,
+) {
     // prepare the satp register that will be used by the harts
     let satp = satp::Satp {
         asid: 0,
         mode: satp::Mode::Sv39,
-        root_table: super::PAGE_TABLE.get() as u64,
+        root_table: 0,
     }
     .as_bits();
 

@@ -3,7 +3,7 @@
 mod vaddr;
 
 use crate::allocator::slab::SlabPool;
-use crate::page::{PageSize, PageTable, Perm};
+use crate::page::{Flags, PageSize};
 use crate::{
     allocator::{self, buddy::MAX_ORDER},
     page, unit,
@@ -13,17 +13,12 @@ use core::ptr::NonNull;
 use riscv::sync::Mutex;
 use sbi::HartMask;
 
-displaydoc_lite::displaydoc! {
-    /// Any error that can happen while allocating or deallocating virtual memory.
-    #[derive(Debug)]
-    pub enum Error {
-        /// {_0}
-        Alloc(allocator::Error),
-        /// {_0}
-        Page(page::Error),
-        /// {_0:?}
-        Sbi(sbi::Error),
-    }
+/// Any error that can happen while allocating or deallocating virtual memory.
+#[derive(Debug)]
+pub enum Error {
+    Alloc(allocator::Error),
+    Page(page::Error),
+    Sbi(sbi::Error),
 }
 
 /// The freelist is used to cache the pages for every order.
@@ -56,7 +51,7 @@ impl FreeList {
                     vaddr,
                     size / PageSize::Megapage.size(),
                     PageSize::Megapage,
-                    Perm::READ | Perm::WRITE | Perm::DIRTY | Perm::ACCESSED,
+                    Flags::READ | Flags::WRITE | Flags::DIRTY | Flags::ACCESSED,
                 )
                 .map_err(Error::Page)?;
 
@@ -159,7 +154,7 @@ impl VirtualAllocator {
                 vaddr,
                 size / PageSize::Megapage.size(),
                 PageSize::Megapage,
-                Perm::READ | Perm::WRITE | Perm::DIRTY | Perm::ACCESSED,
+                Flags::READ | Flags::WRITE | Flags::DIRTY | Flags::ACCESSED,
             )
             .map_err(Error::Page)?;
 
@@ -229,7 +224,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             Ok(ptr) => ptr.as_ptr(),
             Err(err) => {
                 log::warn!(
-                    "{} to allocate memory (size: {} align: {}): {}",
+                    "{} to allocate memory (size: {} align: {}): {:?}",
                     "Failed".yellow(),
                     layout.size(),
                     layout.align(),
@@ -246,7 +241,7 @@ unsafe impl GlobalAlloc for GlobalAllocator {
             Ok(()) => (),
             Err(err) => {
                 log::warn!(
-                    "{} to free memory (size: {} align: {}): {}",
+                    "{} to free memory (size: {} align: {}): {:?}",
                     "Failed".yellow(),
                     layout.size(),
                     layout.align(),

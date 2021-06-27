@@ -1,5 +1,5 @@
 use crate::unit;
-use core::{fmt, ops};
+use core::fmt;
 
 macro_rules! addr_type {
     ($(#[$attr:meta])* $pub:vis struct $name:ident;) => {
@@ -43,6 +43,12 @@ macro_rules! addr_type {
                 x.0
             }
         }
+
+        impl core::fmt::Pointer for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Pointer::fmt(&self.as_ptr::<u8>(), f)
+            }
+        }
     };
 }
 
@@ -82,108 +88,58 @@ impl PageSize {
             PageSize::Gigapage => 1 * unit::GIB,
         }
     }
-}
 
-/// Represents the permissions of a PTE.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct Perm(u8);
-
-impl Perm {
-    pub const READ: Perm = Perm(0b001);
-    pub const WRITE: Perm = Perm(0b010);
-    pub const EXEC: Perm = Perm(0b100);
-
-    pub const ACCESSED: Perm = Perm(1 << 5);
-    pub const DIRTY: Perm = Perm(1 << 6);
-
-    /// Check if this permission is readable.
-    #[inline]
-    pub fn read(self) -> bool {
-        self & Perm::READ != Perm::from(0u8)
+    /// Return the index of the VPN that specifies this page size.
+    pub fn vpn_idx(self) -> usize {
+        match self {
+            PageSize::Kilopage => 0,
+            PageSize::Megapage => 1,
+            PageSize::Gigapage => 2,
+        }
     }
 
-    /// Check if this permission is writable.
-    #[inline]
-    pub fn write(self) -> bool {
-        self & Perm::WRITE != Perm::from(0u8)
-    }
-
-    /// Check if this permission is executable.
-    #[inline]
-    pub fn exec(self) -> bool {
-        self & Perm::EXEC != Perm::from(0u8)
+    /// Return the pagesize that comes after going through a branch at this level.
+    pub fn step(self) -> Option<Self> {
+        match self {
+            PageSize::Kilopage => None,
+            PageSize::Megapage => Some(PageSize::Kilopage),
+            PageSize::Gigapage => Some(PageSize::Megapage),
+        }
     }
 }
 
-impl fmt::Display for Perm {
+bitflags::bitflags! {
+    pub struct Flags: u8 {
+        const READ =     1 << 1;
+        const WRITE =    1 << 2;
+        const EXEC =     1 << 3;
+        const USER =     1 << 4;
+        const GLOBAL =   1 << 5;
+        const ACCESSED = 1 << 6;
+        const DIRTY =    1 << 7;
+    }
+}
+impl fmt::Display for Flags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use owo_colors::OwoColorize;
 
-        if self.read() {
-            write!(f, "{}", "+R".green())?;
-        } else {
-            write!(f, "{}", "-R".red())?;
+        const BITS: &[(Flags, &str)] = &[
+            (Flags::DIRTY, "D"),
+            (Flags::ACCESSED, "A"),
+            (Flags::GLOBAL, "G"),
+            (Flags::USER, "U"),
+            (Flags::EXEC, "X"),
+            (Flags::WRITE, "W"),
+            (Flags::READ, "R"),
+        ];
+
+        for (bit, c) in BITS {
+            match self.contains(*bit) {
+                true => write!(f, "{}", c.green())?,
+                false => write!(f, "{}", "-".red())?,
+            }
         }
 
-        if self.write() {
-            write!(f, "{}", "+W".green())?;
-        } else {
-            write!(f, "{}", "-W".red())?;
-        }
-
-        if self.exec() {
-            write!(f, "{}", "+X".green())
-        } else {
-            write!(f, "{}", "-X".red())
-        }
-    }
-}
-
-impl From<usize> for Perm {
-    fn from(x: usize) -> Perm {
-        Perm((x & 0b1100_0111) as u8)
-    }
-}
-
-impl From<Perm> for usize {
-    fn from(x: Perm) -> usize {
-        x.0.into()
-    }
-}
-
-impl From<u8> for Perm {
-    fn from(x: u8) -> Perm {
-        Perm(x & 0b1100_0111)
-    }
-}
-
-impl From<Perm> for u8 {
-    fn from(x: Perm) -> u8 {
-        x.0
-    }
-}
-
-impl ops::BitOr for Perm {
-    type Output = Perm;
-
-    fn bitor(self, rhs: Perm) -> Perm {
-        Perm(self.0 | rhs.0)
-    }
-}
-
-impl ops::BitAnd for Perm {
-    type Output = Perm;
-
-    fn bitand(self, rhs: Perm) -> Perm {
-        Perm(self.0 & rhs.0)
-    }
-}
-
-impl ops::BitXor for Perm {
-    type Output = Perm;
-
-    fn bitxor(self, rhs: Perm) -> Perm {
-        Perm(self.0 ^ rhs.0)
+        Ok(())
     }
 }
