@@ -112,7 +112,7 @@ pub unsafe fn init_hart_context(
 /// Initialize the ELF Hart local storage, that can be used via the `thread_local` attribute.
 pub unsafe fn init_hart_local_storage() -> Result<(), allocator::Error> {
     // get the range of the tdata section to copy
-    let (start, end) = riscv::symbols::tdata_range();
+    let (start, end) = crate::symbols::tdata_range();
     let len = end as usize - start as usize;
 
     // allocate new memory for the tdata section

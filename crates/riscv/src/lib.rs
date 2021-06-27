@@ -7,6 +7,5 @@
 
 pub mod asm;
 pub mod csr;
-pub mod symbols;
 pub mod sync;
 pub mod trap;

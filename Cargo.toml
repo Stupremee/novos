@@ -3,9 +3,9 @@ members = [
   "xtask",
   "crates/devicetree",
   "crates/sbi",
-  "crates/kernel",
   "crates/riscv",
   "crates/log",
+  "crates/kernel",
 ]
 
 [profile.release]

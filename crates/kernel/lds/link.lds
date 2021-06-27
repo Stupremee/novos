@@ -9,7 +9,7 @@ ENTRY(_boot)
 
 SECTIONS
 {
-  . = 0x80200000;
+  . = 0;
 
   .text : {
     PROVIDE(__kernel_start = .);
@@ -34,6 +34,7 @@ SECTIONS
   PROVIDE(__global_pointer$ = . + 0x800);
 
   .data : {
+    . = ALIGN(0x1000);
     PROVIDE(__data_start = .);
     *(.sdata)
     *(.sdata.*)
@@ -51,6 +52,21 @@ SECTIONS
     . = ALIGN(0x1000);
     PROVIDE(__tdata_end = .);
   }
+
+  .dynsym : {
+		PROVIDE(__dyn_sym_start = .);
+		*(.dynsym)
+		PROVIDE(__dyn_sym_end = .);
+	}
+
+	.rela.dyn : {
+		PROVIDE(__rel_dyn_start = .);
+		*(.rela*)
+		. = ALIGN(8);
+		PROVIDE(__rel_dyn_end = .);
+	}
+
+  . = ALIGN(0x1000);
 
   .bss : {
     PROVIDE(__bss_start = .);

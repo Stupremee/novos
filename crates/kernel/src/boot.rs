@@ -4,12 +4,12 @@ use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
     drivers, hart,
     page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
-    pmem, trap, unit, StaticCell,
+    pmem, symbols, trap, unit, StaticCell,
 };
 use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
-use riscv::{csr::satp, symbols};
+use riscv::csr::satp;
 
 mod harts;
 
@@ -126,12 +126,17 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
         }
     };
 
-    map_section(symbols::text_range(), Perm::READ | Perm::EXEC);
-    map_section(symbols::rodata_range(), Perm::READ);
-    map_section(symbols::data_range(), Perm::READ | Perm::WRITE);
-    map_section(symbols::tdata_range(), Perm::READ | Perm::WRITE);
-    map_section(symbols::bss_range(), Perm::READ | Perm::WRITE);
-    map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
+    //map_section(symbols::text_range(), Perm::READ | Perm::EXEC);
+    //map_section(symbols::rodata_range(), Perm::READ);
+    //map_section(symbols::data_range(), Perm::READ | Perm::WRITE);
+    //map_section(symbols::tdata_range(), Perm::READ | Perm::WRITE);
+    //map_section(symbols::bss_range(), Perm::READ | Perm::WRITE);
+    //map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
+    // FIXME: Link and map sections properly!
+    map_section(
+        symbols::kernel_range(),
+        Perm::READ | Perm::WRITE | Perm::EXEC,
+    );
 
     // allocate the stack for this hart
     let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
@@ -171,7 +176,7 @@ unsafe extern "C" fn entry_trampoline(
         mv t0, sp
         mv sp, a2
         mv t1, a2
-        la t2, __stack_end
+        lla t2, __stack_end
 
     copy_stack:
         bleu t2, t0, copy_stack_done
@@ -235,21 +240,54 @@ unsafe extern "C" fn _boot() -> ! {
             csrw sie, zero
             csrci sstatus, 2
 
+            # Load the link start address
+            li t0, {}
+            lla t1, __kernel_start
+            sub t2, t1, t0
+
+            lla t0, __rel_dyn_start
+            lla t1, __rel_dyn_end
+
+            beq t0, t1, _relocate_done
+            j 5f
+
+        2:
+            ld t5, -16(t0)
+            li t3, 3
+            bne t3, t5, _loop
+            ld t3, -24(t0) 
+            ld t5, -8(t0) 
+            add t5, t5, t2
+            add t3, t3, t2
+            sd t5, 0(t3)
+            j 5f
+
+        5:
+            addi t0, t0, 8 * 3
+            ble t0, t1, 2b
+            j _relocate_done
+
+        _loop:
+            j _loop
+
+        _relocate_done:
+
             # Zero bss section
             la t0, __bss_start
             la t1, __bss_end
 
-        zero_bss:
-            bgeu t0, t1, zero_bss_done
+        _zero_bss:
+            bgeu t0, t1, _zero_bss_done
             sd zero, (t0)
             addi t0, t0, 8
-            j zero_bss
+            j _zero_bss
 
-        zero_bss_done:
+        _zero_bss_done:
 
             # Jump into rust code
             la sp, __stack_end
             j _before_main",
+        const crate::symbols::LINK_START,
         options(noreturn)
     )
 }
