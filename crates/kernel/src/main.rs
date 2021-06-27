@@ -21,7 +21,6 @@ pub mod drivers;
 pub mod hart;
 pub mod page;
 pub mod pmem;
-pub mod symbols;
 pub mod trap;
 pub mod unit;
 pub mod vmem;

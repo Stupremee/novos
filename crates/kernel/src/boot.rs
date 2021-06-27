@@ -1,18 +1,17 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
-mod harts;
-mod reloc;
-
 use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
     drivers, hart,
     page::{self, PageSize, PageTable, Perm, PhysAddr, VirtAddr},
-    pmem, symbols, trap, unit, StaticCell,
+    pmem, trap, unit, StaticCell,
 };
 use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
-use riscv::csr::satp;
+use riscv::{csr::satp, symbols};
+
+mod harts;
 
 static PAGE_TABLE: StaticCell<page::sv39::Table> = StaticCell::new(page::sv39::Table::new());
 
@@ -71,7 +70,8 @@ pub(self) fn alloc_kernel_stack(table: &mut page::sv39::Table, id: u64) -> (Phys
 
 /// The code that sets up memory stuff,
 /// allocates a new stack and then runs the real main function.
-unsafe extern "C" fn before_main(hart_id: usize, fdt: *const u8) -> ! {
+#[no_mangle]
+unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     let fdt = DeviceTree::from_ptr(fdt).unwrap();
 
     // if the underyling sbi implementation supports `put_char`, use it as a
@@ -79,9 +79,8 @@ unsafe extern "C" fn before_main(hart_id: usize, fdt: *const u8) -> ! {
     if sbi::base::probe_ext(0x01).unwrap_or(false) {
         log::init_log(SbiLogger).map_err(|_| ()).unwrap();
     }
-    // initialize the physmem allocator
 
-    //sbi::system::shutdown();
+    // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
 
     // get access to the global page table
@@ -130,6 +129,7 @@ unsafe extern "C" fn before_main(hart_id: usize, fdt: *const u8) -> ! {
     map_section(symbols::text_range(), Perm::READ | Perm::EXEC);
     map_section(symbols::rodata_range(), Perm::READ);
     map_section(symbols::data_range(), Perm::READ | Perm::WRITE);
+    map_section(symbols::tdata_range(), Perm::READ | Perm::WRITE);
     map_section(symbols::bss_range(), Perm::READ | Perm::WRITE);
     map_section(symbols::stack_range(), Perm::READ | Perm::WRITE);
 
@@ -235,9 +235,21 @@ unsafe extern "C" fn _boot() -> ! {
             csrw sie, zero
             csrci sstatus, 2
 
-            # Relocate the kernel and then run it
-            j {}",
-        sym reloc::reloc_and_run,
+            # Zero bss section
+            la t0, __bss_start
+            la t1, __bss_end
+
+        zero_bss:
+            bgeu t0, t1, zero_bss_done
+            sd zero, (t0)
+            addi t0, t0, 8
+            j zero_bss
+
+        zero_bss_done:
+
+            # Jump into rust code
+            la sp, __stack_end
+            j _before_main",
         options(noreturn)
     )
 }

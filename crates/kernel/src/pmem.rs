@@ -70,7 +70,7 @@ pub unsafe fn init(tree: &DeviceTree<'_>) -> Result<(), Error> {
 /// Get a list of memory ranges that must not be used for memory allocation,
 /// like the kernel itself and OpenSBI.
 fn get_blocked_ranges() -> [Range; 2] {
-    let (kernel_start, kernel_end) = crate::symbols::kernel_range();
+    let (kernel_start, kernel_end) = riscv::symbols::kernel_range();
 
     [
         // this range contains the OpenSBI firmware
