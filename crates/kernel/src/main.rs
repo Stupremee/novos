@@ -9,7 +9,8 @@
     alloc_error_handler,
     allocator_api,
     fn_align,
-    thread_local
+    thread_local,
+    vec_into_raw_parts
 )]
 #![allow(clippy::missing_safety_doc, clippy::empty_loop)]
 

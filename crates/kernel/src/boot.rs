@@ -4,16 +4,17 @@ use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
     drivers, hart,
     page::{self, Flags, KernelPageTable, PageSize, PhysAddr, VirtAddr},
-    pmem, symbols, trap, unit, StaticCell,
+    pmem, symbols, trap, unit,
 };
 use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
-use riscv::csr::satp;
+use riscv::{csr::satp, sync::Mutex};
 
 mod harts;
 
-//static PAGE_TABLE: StaticCell<KernelPageTable> = StaticCell::new(KernelPageTable::new());
+#[doc(hidden)]
+pub(crate) static PAGE_TABLE: Mutex<Option<KernelPageTable>> = Mutex::new(None);
 
 /// The base virtual addresses where the stack for every hart is located.
 pub const KERNEL_STACK_BASE: usize = 0x001D_DD00_0000;
@@ -83,21 +84,9 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     // initialize the physmem allocator
     pmem::init(&fdt).unwrap();
 
-    let mut table = KernelPageTable::new();
-    table
-        .map(
-            0x1000_0000.into(),
-            0x1020_0000.into(),
-            PageSize::Megapage,
-            Flags::READ,
-        )
-        .unwrap();
-    log::debug!("{:?}", table.debug());
-
-    sbi::system::shutdown();
-
     // get access to the global page table
-    let table: &mut KernelPageTable = todo!();
+    let mut table_lock = PAGE_TABLE.lock();
+    let table = table_lock.get_or_insert_with(|| KernelPageTable::new());
 
     // copy the devicetree to a newly allocated physical page
     let fdt_order = order_for_size(fdt.total_size() as usize);
@@ -139,26 +128,56 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
         }
     };
 
-    //map_section(symbols::text_range(), Flags::READ | Flags::EXEC);
-    //map_section(symbols::rodata_range(), Flags::READ);
-    //map_section(symbols::data_range(), Flags::READ | Flags::WRITE);
-    //map_section(symbols::tdata_range(), Flags::READ | Flags::WRITE);
-    //map_section(symbols::bss_range(), Flags::READ | Flags::WRITE);
-    //map_section(symbols::stack_range(), Flags::READ | Flags::WRITE);
+    //map_section(
+    //(0x8000_0000 as *mut u8, 0x8020_0000 as *mut u8),
+    //Flags::READ | Flags::EXEC,
+    //);
+    map_section(symbols::text_range(), Flags::READ | Flags::EXEC);
+    map_section(symbols::rodata_range(), Flags::READ);
+    map_section(symbols::data_range(), Flags::READ | Flags::WRITE);
+    map_section(symbols::tdata_range(), Flags::READ | Flags::WRITE);
+    map_section(symbols::bss_range(), Flags::READ | Flags::WRITE);
+    map_section(symbols::stack_range(), Flags::READ | Flags::WRITE);
     // FIXME: Link and map sections properly!
-    map_section(
-        symbols::kernel_range(),
-        Flags::READ | Flags::WRITE | Flags::EXEC,
-    );
+    //map_section(
+    //symbols::kernel_range(),
+    //Flags::READ | Flags::WRITE | Flags::EXEC,
+    //);
 
     // allocate the stack for this hart
     let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
+
+    let root_table = table.root_ptr() as u64;
+
+    // before enabling paging, we need to convert the global page table to use virtual addresses
+    replace_with::replace_with(
+        table,
+        || sbi::system::fail_shutdown(),
+        |me| {
+            // get the raw parts from the current pagetable
+            let (entries, (ptr, len, cap)) = me.into_raw_parts();
+
+            // convert the pointers to virtual addresses
+            let entries = entries.cast::<u8>().add(KERNEL_PHYS_MEM_BASE).cast();
+            let ptr = ptr.cast::<u8>().add(KERNEL_PHYS_MEM_BASE).cast();
+
+            // create the new, converted page table
+            let table = KernelPageTable::from_raw_parts(
+                Box::from_raw_in(entries, pmem::GlobalPhysicalAllocator),
+                alloc::vec::Vec::from_raw_parts_in(ptr, len, cap, pmem::GlobalPhysicalAllocator),
+            );
+            table
+        },
+    );
+
+    // drop the page table to unlock the lock
+    drop(table_lock);
 
     // enable paging
     satp::write(satp::Satp {
         asid: 0,
         mode: satp::Mode::Sv39,
-        root_table: table as *const _ as u64,
+        root_table,
     });
     riscv::asm::sfence(None, None);
 
@@ -225,8 +244,10 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &'static DeviceTree<'s
     hart::init_hart_local_storage().unwrap();
 
     // boot up the other harts
-    let table: &mut KernelPageTable = todo!();
-    harts::boot_all_harts(hart_id, fdt, table);
+    {
+        let mut table = page::root();
+        harts::boot_all_harts(hart_id, fdt, &mut *table);
+    }
 
     // jump into safe rust code
     crate::main(fdt)

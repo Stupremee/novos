@@ -13,4 +13,5 @@ log = { path = "../log" }
 sbi = { path = "../sbi" }
 owo-colors = "1.3"
 voladdress = "0.4"
+replace_with = { version = "0.1.7", default-features = false }
 bitflags = "1"

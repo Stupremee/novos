@@ -1,5 +1,5 @@
 use crate::hart;
-use core::fmt;
+use core::fmt::{self, Write};
 use core::panic::PanicInfo;
 
 struct PanicPrinter<'panic>(&'panic PanicInfo<'panic>);
@@ -31,11 +31,23 @@ impl fmt::Display for PanicPrinter<'_> {
 
 #[panic_handler]
 fn panic_handler(info: &PanicInfo<'_>) -> ! {
-    log::error!("{}", PanicPrinter(info));
-
     if hart::try_current().map_or(true, |c| c.is_bsp()) {
+        // if a panic on the main hart occurrs, don't use the global logger because it might
+        // deadlock, instead use directly print to the SBI output.
+        struct PanicLogger;
+        impl fmt::Write for PanicLogger {
+            fn write_str(&mut self, x: &str) -> core::fmt::Result {
+                let _ = x.chars().try_for_each(sbi::legacy::put_char);
+                Ok(())
+            }
+        }
+
+        let _ = write!(&mut PanicLogger, "{}", PanicPrinter(info));
+
         sbi::system::fail_shutdown();
     } else {
+        log::error!("{}", PanicPrinter(info));
+
         // try to stop this hart if it paniced
         let _ = sbi::hsm::stop();
 

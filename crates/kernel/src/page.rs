@@ -11,7 +11,8 @@ use crate::{
     boot::KERNEL_PHYS_MEM_BASE,
     pmem::{self, GlobalPhysicalAllocator},
 };
-use core::{fmt, marker::PhantomData, ptr::NonNull};
+use core::{fmt, marker::PhantomData, ops, ptr::NonNull};
+use riscv::sync::MutexGuard;
 
 mod sealed {
     pub trait Sealed {}
@@ -72,12 +73,27 @@ pub unsafe trait PagingMode: sealed::Sealed {
 
 /// Generic representation of a page table that can support any paging mode.
 pub struct PageTable<M> {
-    entries: Box<[Entry; 512]>,
-    subtables: Vec<NonNull<[Entry; 512]>>,
+    pub entries: Box<[Entry; 512]>,
+    pub subtables: Vec<NonNull<[Entry; 512]>>,
     _mode: PhantomData<M>,
 }
 
+unsafe impl<M> Send for PageTable<M> {}
+unsafe impl<M> Sync for PageTable<M> {}
+
 impl<M> PageTable<M> {
+    /// Create a new pagetable from the raw entries pointer and a subtables pointer.
+    pub unsafe fn from_raw_parts(
+        entries: Box<RawPageTable>,
+        subtables: Vec<NonNull<RawPageTable>>,
+    ) -> Self {
+        Self {
+            entries,
+            subtables,
+            _mode: PhantomData,
+        }
+    }
+
     /// Create a new, empty page table.
     pub fn new() -> Self {
         Self {
@@ -85,6 +101,24 @@ impl<M> PageTable<M> {
             subtables: Vec::new_in(GlobalPhysicalAllocator),
             _mode: PhantomData,
         }
+    }
+
+    /// Turn this pagetable into the raw underlying parts.
+    pub fn into_raw_parts(
+        self,
+    ) -> (
+        *mut RawPageTable,
+        (*mut NonNull<RawPageTable>, usize, usize),
+    ) {
+        let mut me = core::mem::ManuallyDrop::new(self);
+        (
+            me.entries.as_mut_ptr().cast(),
+            (
+                me.subtables.as_mut_ptr(),
+                me.subtables.len(),
+                me.subtables.capacity(),
+            ),
+        )
     }
 }
 
@@ -97,6 +131,11 @@ impl<M: PagingMode> PageTable<M> {
             addr: VirtAddr::from(0),
             _mode: PhantomData::<M>,
         }
+    }
+
+    /// Return the pointer to the root page table that can be inserted into the `satp` register.
+    pub fn root_ptr(&self) -> *const () {
+        self.entries.as_ptr().cast()
     }
 
     /// Map a physical address to a virtual address using a given page size, with the given flags.
@@ -129,8 +168,10 @@ impl<M: PagingMode> PageTable<M> {
                 None => {
                     // the entry is empty, so we allocate a new table and turn this entry
                     // into a branch to the new table
-                    let new_table = Box::new_in([Entry::ZERO; 512], GlobalPhysicalAllocator);
-                    let table_ptr = Box::into_raw(new_table);
+                    let table_ptr = pmem::zalloc_order(0)
+                        .map_err(Error::Alloc)?
+                        .as_ptr()
+                        .cast::<RawPageTable>();
 
                     // update the current entry to point to the new page
                     entry.0 = ((table_ptr as usize as u64) >> 2) | Entry::VALID;
@@ -138,7 +179,12 @@ impl<M: PagingMode> PageTable<M> {
                         .push(unsafe { NonNull::new_unchecked(table_ptr) });
 
                     // traverse the newly allocated table
-                    table = unsafe { table_ptr.as_mut().unwrap() };
+                    table = unsafe {
+                        phys2virt(table_ptr)
+                            .as_ptr::<RawPageTable>()
+                            .as_mut()
+                            .unwrap()
+                    };
                 }
             }
         }
@@ -195,7 +241,7 @@ impl<M: PagingMode> PageTable<M> {
             self.map(paddr, vaddr.into(), page_size, flags)?;
 
             // flush tlb for this page
-            riscv::asm::sfence(usize::from(vaddr), None);
+            riscv::asm::sfence(vaddr, None);
         }
 
         Ok(())
@@ -204,28 +250,151 @@ impl<M: PagingMode> PageTable<M> {
     /// Free a virtual allocation that was previously allocated by the `map_alloc` method.
     ///
     /// The count *must* be the same number used for allocation.
-    pub unsafe fn free(&mut self, _vaddr: VirtAddr, _count: usize) -> Result<()> {
-        todo!()
+    pub unsafe fn free(&mut self, vaddr: VirtAddr, count: usize) -> Result<()> {
+        // translate the first page manually, to get the page size
+        let (_, page_size) = self.translate(vaddr).ok_or(Error::InvalidAddress)?;
+        let end = usize::from(vaddr) + (page_size.size() * count);
+
+        // the order that will be used for the buddy allocator for freeing the pages
+        let order = match page_size {
+            PageSize::Kilopage => 0,
+            PageSize::Megapage => 9,
+            PageSize::Gigapage => unimplemented!(),
+        };
+
+        // loop through the rest of the pages and deallocate them too
+        for page in (usize::from(vaddr)..end).step_by(page_size.size()) {
+            // translate the address to find the physaddr which we need for deallocation
+            let (paddr, _) = self.translate(page.into()).unwrap();
+
+            // unmap the page
+            assert!(self.unmap(page.into())?);
+
+            // flush tlb for this page
+            riscv::asm::sfence(usize::from(vaddr), None);
+
+            // deallocate the page
+            pmem::free_order(NonNull::new(paddr.as_ptr()).unwrap(), order)
+                .map_err(Error::Alloc)?;
+        }
+
+        Ok(())
     }
 
     /// Translate the virtual address and return the physical address it's pointing to, and the
     /// size of the mapped page.
-    pub fn translate(&self, _vaddr: VirtAddr) -> Option<(PhysAddr, PageSize)> {
-        todo!()
+    pub fn translate(&self, vaddr: VirtAddr) -> Option<(PhysAddr, PageSize)> {
+        self.traverse(vaddr).map(|Mapping { entry, size, .. }| {
+            // read the PTE from the found address
+            let entry = unsafe { entry.as_ref().unwrap() };
+
+            // get the page offset from the virtual address
+            let off = usize::from(vaddr);
+            let off = match size {
+                PageSize::Kilopage => off & 0xFFF,
+                PageSize::Megapage => off & 0x1FFFFF,
+                PageSize::Gigapage => off & 0x3FFFFFFF,
+            };
+
+            // get the physical page number specified by the PTE
+            // and return the PPN plus the page offset
+            let ppn = PhysAddr::from(((entry.0 as usize >> 10) & 0x0FFF_FFFF_FFFF) << 12);
+            (ppn.offset(off), size)
+        })
     }
 
     /// Try to unmap the given virtual address.
     ///
     /// The bool indicates if there was a virtual address that was unmapped.
     /// It's `false` if `vaddr` is not mapped.
-    pub fn unmap(&mut self, _vaddr: VirtAddr) -> Result<bool> {
-        todo!()
+    pub fn unmap(&mut self, vaddr: VirtAddr) -> Result<bool> {
+        let Mapping { entry, .. } = match self.traverse(vaddr) {
+            Some(x) => x,
+            // there's no mapping the for given address
+            None => return Ok(false),
+        };
+
+        // clear the entry by zeroing it
+        unsafe {
+            core::ptr::write_volatile(entry, Entry::ZERO);
+        }
+        Ok(true)
+    }
+
+    /// Traverse the page table and search for the given virtual address.
+    fn traverse(&self, vaddr: VirtAddr) -> Option<Mapping> {
+        // represent the current table that is walked.
+        let mut table = &*self.entries;
+        let mut idx = M::LEVELS - 1;
+
+        // we store the level 1 and 2 tables to return them
+        let mut table_mib = None;
+        let mut table_kib = None;
+
+        let entry = loop {
+            // get the entry at this level
+            let entry = &table[M::vpn(vaddr, idx)];
+
+            match entry.kind()? {
+                // we found a mapped address, so break the loop
+                EntryKind::Leaf => break PhysAddr::from(entry as *const _),
+                EntryKind::Branch(new_table_ptr) => {
+                    // this entry points to the next level, so traverse the next level
+                    let new_table = phys2virt(new_table_ptr.as_ptr::<u8>());
+                    table = unsafe { new_table.as_ptr::<RawPageTable>().as_ref().unwrap() };
+
+                    // update the level 1 and 2 table variable to return them later
+                    match idx {
+                        1 => table_kib = Some(new_table_ptr),
+                        2 => table_mib = Some(new_table_ptr),
+                        _ => {}
+                    }
+                }
+            }
+
+            // check if we reached the last table
+            if idx == 0 {
+                return None;
+            }
+
+            // go to the next level
+            idx -= 1;
+        };
+
+        Some(Mapping {
+            table_mib,
+            table_kib,
+            entry: entry.as_ptr(),
+            size: match idx {
+                0 => PageSize::Kilopage,
+                1 => PageSize::Megapage,
+                2 => PageSize::Gigapage,
+                _ => unreachable!(),
+            },
+        })
+    }
+}
+
+impl<M> Drop for PageTable<M> {
+    fn drop(&mut self) {
+        for ptr in self.subtables.drain(..) {
+            let _ = unsafe { pmem::free(ptr.cast()) };
+        }
     }
 }
 
 #[derive(Debug)]
+struct Mapping {
+    table_mib: Option<PhysAddr>,
+    table_kib: Option<PhysAddr>,
+
+    entry: *mut Entry,
+    size: PageSize,
+}
+
+#[derive(Debug)]
 #[repr(transparent)]
-struct Entry(u64);
+pub struct Entry(u64);
 
 impl Entry {
     const VALID: u64 = 1 << 0;
@@ -307,8 +476,32 @@ impl<M: PagingMode> fmt::Debug for DebugPageTable<'_, M> {
     }
 }
 
-// A dummy mutex that ensures exclusive access to the page table
-/// Get exclusive access to the global page table.
-pub fn root() -> &'static mut PageTable<modes::Sv39> {
-    panic!()
+/// Get exclusive access to the global page table, if there is one.
+pub fn root() -> TableGuard {
+    TableGuard {
+        guard: crate::boot::PAGE_TABLE.lock(),
+    }
+}
+
+/// Structure that protects access to the global page table.
+pub struct TableGuard {
+    guard: MutexGuard<'static, Option<KernelPageTable>>,
+}
+
+impl ops::Deref for TableGuard {
+    type Target = KernelPageTable;
+
+    fn deref(&self) -> &Self::Target {
+        self.guard
+            .as_ref()
+            .expect("there is no global page table to take")
+    }
+}
+
+impl ops::DerefMut for TableGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.guard
+            .as_mut()
+            .expect("there is no global page table to take")
+    }
 }

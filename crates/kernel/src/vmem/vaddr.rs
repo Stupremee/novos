@@ -1,3 +1,4 @@
+use crate::allocator::PAGE_SIZE;
 use crate::boot::KERNEL_VMEM_ALLOC_BASE;
 use crate::page::{PageSize, VirtAddr};
 use crate::pmem::GlobalPhysicalAllocator;
@@ -44,7 +45,7 @@ impl VirtualAddressAllocator {
             let num_entries = (n + 63) / 64;
 
             // go through the bitmap in windows of the required entry count
-            for (idx, window) in self.bitmap().windows(num_entries).enumerate() {
+            for (idx, window) in self.bitmap.windows(num_entries).enumerate() {
                 // if one of the entries in this window, is not empty,
                 // we can't fit the requested size
                 if window.iter().any(|entry| *entry != 0) {
@@ -52,7 +53,7 @@ impl VirtualAddressAllocator {
                 }
 
                 // set the entries to full
-                self.bitmap()[idx..idx + num_entries]
+                self.bitmap[idx..idx + num_entries]
                     .iter_mut()
                     .for_each(|entry| *entry = FULL_ENTRY);
 
@@ -63,8 +64,8 @@ impl VirtualAddressAllocator {
 
             // if we hit this, there are no entries, so grow the bitmap
             // and try again
-            let bitmap = self.bitmap();
-            bitmap.resize(bitmap.len() * 2, 0);
+            self.bitmap
+                .resize((self.bitmap.len() * 2).max(PAGE_SIZE), 0);
             return self.next_vaddr(n);
         }
 
@@ -73,7 +74,7 @@ impl VirtualAddressAllocator {
 
         // check each entry, that is not full, to see if it has the
         // requested amount of pages free
-        for (idx, entry) in self.bitmap().iter_mut().enumerate() {
+        for (idx, entry) in self.bitmap.iter_mut().enumerate() {
             // if the entry is full, skip it
             if *entry == FULL_ENTRY {
                 continue;
@@ -97,8 +98,8 @@ impl VirtualAddressAllocator {
 
         // if we hit this, there are no entries, so grow the bitmap
         // and try again
-        let bitmap = self.bitmap();
-        bitmap.resize(bitmap.len() * 2, 0);
+        self.bitmap
+            .resize((self.bitmap.len() * 2).max(PAGE_SIZE), 0);
         self.next_vaddr(n)
     }
 
@@ -116,7 +117,7 @@ impl VirtualAddressAllocator {
             let num_entries = (n + 63) / 64;
 
             // mark the entries as free
-            self.bitmap()[entry..entry + num_entries]
+            self.bitmap[entry..entry + num_entries]
                 .iter_mut()
                 .for_each(|entry| *entry = 0);
 
@@ -129,13 +130,8 @@ impl VirtualAddressAllocator {
         let mask = !((1 << bit) - 1) as u64;
 
         // mark the pages as free
-        let entry = &mut self.bitmap()[entry];
+        let entry = &mut self.bitmap[entry];
         *entry &= mask;
-    }
-
-    #[inline]
-    fn bitmap(&mut self) -> &mut Vec<u64, GlobalPhysicalAllocator> {
-        &mut self.bitmap
     }
 }
 

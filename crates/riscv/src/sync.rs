@@ -34,7 +34,11 @@ impl<T: ?Sized> Mutex<T> {
             core::hint::spin_loop();
         }
 
-        MutexGuard { lock: self }
+        MutexGuard {
+            now_serving: &self.now_serving,
+            data: &self.data,
+            ticket,
+        }
     }
 }
 
@@ -43,26 +47,28 @@ unsafe impl<T: Send> Send for Mutex<T> {}
 
 /// The guard providing protected access to the data of a `Mutex`.
 pub struct MutexGuard<'lock, T: ?Sized> {
-    lock: &'lock Mutex<T>,
+    now_serving: &'lock AtomicUsize,
+    data: &'lock UnsafeCell<T>,
+    ticket: usize,
 }
 
 impl<T: ?Sized> Deref for MutexGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.lock.data.get() }
+        unsafe { &*self.data.get() }
     }
 }
 
 impl<T: ?Sized> DerefMut for MutexGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.lock.data.get() }
+        unsafe { &mut *self.data.get() }
     }
 }
 
 impl<T: ?Sized> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        self.lock.now_serving.fetch_add(1, Ordering::Release);
+        self.now_serving.store(self.ticket + 1, Ordering::Release);
     }
 }
 

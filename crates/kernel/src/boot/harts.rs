@@ -20,7 +20,7 @@ pub(super) unsafe fn boot_all_harts(
     let satp = satp::Satp {
         asid: 0,
         mode: satp::Mode::Sv39,
-        root_table: 0,
+        root_table: table.root_ptr() as u64,
     }
     .as_bits();
 
