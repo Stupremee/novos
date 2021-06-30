@@ -1,8 +1,7 @@
 //! Code to bringup all secondary harts.
 
-use crate::{drivers::DeviceManager, hart, page::KernelPageTable};
+use crate::{drivers::DeviceManager, hart, page};
 use devicetree::DeviceTree;
-use riscv::csr::satp;
 
 #[repr(C)]
 struct HartArgs {
@@ -11,24 +10,14 @@ struct HartArgs {
 }
 
 /// Boot all harts that are present in the given devicetree.
-pub(super) unsafe fn boot_all_harts(
-    hart_id: usize,
-    fdt: &DeviceTree<'_>,
-    table: &mut KernelPageTable,
-) {
-    // prepare the satp register that will be used by the harts
-    let satp = satp::Satp {
-        asid: 0,
-        mode: satp::Mode::Sv39,
-        root_table: table.root_ptr() as u64,
-    }
-    .as_bits();
-
+pub(super) unsafe fn boot_all_harts(hart_id: usize, fdt: &DeviceTree<'_>, satp: u64) {
     // extract all harts that do not have our id from the devicetree
     let cores = fdt
         .find_nodes("/cpus/cpu@")
         .filter_map(|cpu| cpu.prop("reg")?.as_u32())
         .filter(|id| *id as usize != hart_id);
+
+    let mut table = page::root();
 
     // go through each hart and try to boot it
     for hart in cores {
@@ -38,7 +27,7 @@ pub(super) unsafe fn boot_all_harts(
         };
 
         // allocate stack in physical memory, since it will be mapped in later by the hart
-        let (pstack, vstack) = super::alloc_kernel_stack(table, hart as u64);
+        let (pstack, vstack) = super::alloc_kernel_stack(&mut *table, hart as u64);
 
         // write the hart arguments to the stack
         let pstack = pstack.as_ptr::<HartArgs>().offset(-1).cast::<usize>();
@@ -48,7 +37,7 @@ pub(super) unsafe fn boot_all_harts(
         let vstack = vstack.cast::<usize>();
 
         // write the satp value on the new stack
-        vstack.offset(-1).write(satp);
+        vstack.offset(-1).write(satp as usize);
 
         // write the virtual stack to the new stack
         vstack.offset(-2).write(vstack as usize);
@@ -69,7 +58,7 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _sp: usize) -> ! {
         # the `gp` register
         .option push
         .option norelax
-        lla gp, __global_pointer$
+            lla gp, __global_pointer$
         .option pop
 
         # Load arguments from stack

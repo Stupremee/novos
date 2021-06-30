@@ -9,7 +9,7 @@ ENTRY(_boot)
 
 SECTIONS
 {
-  . = 0;
+  . = 0x80200000;
 
   .text : {
     PROVIDE(__kernel_start = .);

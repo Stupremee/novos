@@ -1,5 +1,8 @@
 //! Kernel entrypoint and everything related to boot into the kernel
 
+mod harts;
+mod reloc;
+
 use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
     drivers, hart,
@@ -10,8 +13,6 @@ use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
 use riscv::{csr::satp, sync::Mutex};
-
-mod harts;
 
 #[doc(hidden)]
 pub(crate) static PAGE_TABLE: Mutex<Option<KernelPageTable>> = Mutex::new(None);
@@ -128,6 +129,8 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
         }
     };
 
+    assert_eq!(reloc::relocate(0x8020_0000), 0);
+
     //map_section(
     //(0x8000_0000 as *mut u8, 0x8020_0000 as *mut u8),
     //Flags::READ | Flags::EXEC,
@@ -224,6 +227,7 @@ unsafe extern "C" fn entry_trampoline(
 
         # Jump into rust code again
     copy_stack_done:
+        csrr a2, satp
         jr a3
     ",
     options(noreturn));
@@ -232,7 +236,11 @@ unsafe extern "C" fn entry_trampoline(
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`.
 ///
 /// This function also brings up the other harts.
-unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &'static DeviceTree<'static>) -> ! {
+unsafe extern "C" fn rust_trampoline(
+    hart_id: usize,
+    fdt: &'static DeviceTree<'static>,
+    satp: u64,
+) -> ! {
     // install the interrupt handler
     trap::install_handler();
 
@@ -244,10 +252,7 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: &'static DeviceTree<'s
     hart::init_hart_local_storage().unwrap();
 
     // boot up the other harts
-    {
-        let mut table = page::root();
-        harts::boot_all_harts(hart_id, fdt, &mut *table);
-    }
+    harts::boot_all_harts(hart_id, fdt, satp);
 
     // jump into safe rust code
     crate::main(fdt)
@@ -274,41 +279,28 @@ unsafe extern "C" fn _boot() -> ! {
             csrw sie, zero
             csrci sstatus, 2
 
-            # Load the link start address
-            li t0, {}
-            lla t1, __kernel_start
-            sub t2, t1, t0
+            # Relocate the kernel to the base address where we are currently linked
+            lla sp, __stack_end
 
-            lla t0, __rel_dyn_start
-            lla t1, __rel_dyn_end
+            # Save the arguments we need for later
+            addi sp, sp, -16
+            sd a0, 0(sp)
+            sd a1, 8(sp)
 
-            beq t0, t1, 4f
-            j 2f
+            lla a0, __kernel_start
+            call {reloc}
+
+            # If relocate returned 0, we successfully relocated
+            beqz a0, 2f
 
         1:
-            ld t5, -16(t0)
-            li t3, 3
-            bne t3, t5, 3f
-            ld t3, -24(t0) 
-            ld t5, -8(t0) 
-            add t5, t5, t2
-            add t3, t3, t2
-            sd t5, 0(t3)
-            j 2f
+            # An error occurred. For now we are just looping
+            j 1b
 
         2:
-            addi t0, t0, 8 * 3
-            ble t0, t1, 1b
-            j 4f
-
-        3:
-            # An error occurred. For now we are just looping
-            j 3b
-
-        4:
             # Zero bss section
-            la t0, __bss_start
-            la t1, __bss_end
+            lla t0, __bss_start
+            lla t1, __bss_end
 
         _zero_bss:
             bgeu t0, t1, _zero_bss_done
@@ -318,10 +310,14 @@ unsafe extern "C" fn _boot() -> ! {
 
         _zero_bss_done:
 
+            # Load arguments from stack
+            ld a0, 0(sp)
+            ld a1, 8(sp)
+            addi sp, sp, 16
+
             # Jump into rust code
-            la sp, __stack_end
             j _before_main",
-        const crate::symbols::LINK_START,
+        reloc = sym reloc::relocate,
         options(noreturn)
     )
 }
