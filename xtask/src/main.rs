@@ -63,7 +63,7 @@ fn main() -> Result<()> {
 }
 
 /// Run the kernel using QEMU.
-fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
+pub fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
     let ram = args
         .opt_value_from_str::<_, String>("--ram")?
         .unwrap_or_else(|| "512".to_string());
@@ -143,10 +143,7 @@ fn run(no_release: bool, spike: bool, mut args: Arguments) -> Result<()> {
 fn build(no_release: bool, spike: bool) -> Result<()> {
     let release = if no_release { &[][..] } else { &["--release"] };
 
-    cmd!(
-        "cargo build -p kernel {release...}"
-    )
-    .run()?;
+    cmd!("cargo build -p kernel {release...}").run()?;
 
     let path = if no_release {
         "target/riscv64gc-unknown-none-elf/debug/kernel"

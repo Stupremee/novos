@@ -12,23 +12,24 @@ use crate::{
     pmem::{self, GlobalPhysicalAllocator},
 };
 use core::{fmt, marker::PhantomData, ops, ptr::NonNull};
-use riscv::sync::MutexGuard;
+use riscv::{csr::satp, sync::MutexGuard};
 
 mod sealed {
     pub trait Sealed {}
     impl Sealed for super::modes::Sv39 {}
+    impl Sealed for super::modes::Sv48 {}
 }
 
 type Box<T> = alloc::boxed::Box<T, GlobalPhysicalAllocator>;
 type Vec<T> = alloc::vec::Vec<T, GlobalPhysicalAllocator>;
-type RawPageTable = [Entry; 512];
 
 pub type Result<T> = core::result::Result<T, Error>;
-pub type KernelPageTable = PageTable<modes::Sv39>;
+pub type KernelPageTable = PageTable<modes::Sv48>;
 
 /// Errors that are related to paging.
 #[derive(Debug)]
 pub enum Error {
+    UnsupportedPageSize,
     InvalidAddress,
     UnalignedAddress,
     AlreadyMapped,
@@ -61,14 +62,11 @@ pub unsafe trait PagingMode: sealed::Sealed {
     /// The largest page size this mode supports.
     const TOP_LEVEL_SIZE: PageSize;
 
-    /// Check if the two addresses are valid to be mapped for the given page size.
-    fn validate_addresses(paddr: PhysAddr, vaddr: VirtAddr, size: PageSize) -> Result<()>;
+    /// The mode that will be put into the satp CSR.
+    const SATP_MODE: satp::Mode;
 
-    /// Get the VPN with the given index.
-    fn vpn(vaddr: VirtAddr, idx: usize) -> usize;
-
-    /// Set the VPN in the given virtual and return the new address.
-    fn set_vpn(vaddr: VirtAddr, idx: usize, val: usize) -> VirtAddr;
+    /// The maximum address that is possible to map.
+    const MAX_ADDRESS: usize;
 }
 
 /// Generic representation of a page table that can support any paging mode.
@@ -84,8 +82,8 @@ unsafe impl<M> Sync for PageTable<M> {}
 impl<M> PageTable<M> {
     /// Create a new pagetable from the raw entries pointer and a subtables pointer.
     pub unsafe fn from_raw_parts(
-        entries: Box<RawPageTable>,
-        subtables: Vec<NonNull<RawPageTable>>,
+        entries: Box<[Entry; 512]>,
+        subtables: Vec<NonNull<[Entry; 512]>>,
     ) -> Self {
         Self {
             entries,
@@ -107,8 +105,8 @@ impl<M> PageTable<M> {
     pub fn into_raw_parts(
         self,
     ) -> (
-        *mut RawPageTable,
-        (*mut NonNull<RawPageTable>, usize, usize),
+        *mut [Entry; 512],
+        (*mut NonNull<[Entry; 512]>, usize, usize),
     ) {
         let mut me = core::mem::ManuallyDrop::new(self);
         (
@@ -123,6 +121,15 @@ impl<M> PageTable<M> {
 }
 
 impl<M: PagingMode> PageTable<M> {
+    /// Construct a value that is ready to be written into the satp CSR.
+    pub fn satp(&self) -> satp::Satp {
+        satp::Satp {
+            asid: 0,
+            mode: M::SATP_MODE,
+            root_table: self.entries.as_ptr() as u64,
+        }
+    }
+
     /// Return a debug printable version of this table.
     pub fn debug(&self) -> impl fmt::Debug + '_ {
         DebugPageTable {
@@ -133,11 +140,6 @@ impl<M: PagingMode> PageTable<M> {
         }
     }
 
-    /// Return the pointer to the root page table that can be inserted into the `satp` register.
-    pub fn root_ptr(&self) -> *const () {
-        self.entries.as_ptr().cast()
-    }
-
     /// Map a physical address to a virtual address using a given page size, with the given flags.
     pub fn map(
         &mut self,
@@ -146,14 +148,26 @@ impl<M: PagingMode> PageTable<M> {
         size: PageSize,
         flags: Flags,
     ) -> Result<()> {
+        // check if this paging mode supports the given pagesize
+        if size.vpn_idx() >= M::LEVELS {
+            return Err(Error::UnsupportedPageSize);
+        }
+
         // validate the addresses
-        M::validate_addresses(paddr, vaddr, size)?;
+        if usize::from(vaddr) >= M::MAX_ADDRESS {
+            return Err(Error::InvalidAddress);
+        }
+
+        // verify the given addresses
+        if !size.is_aligned(paddr.into()) || !size.is_aligned(vaddr.into()) {
+            return Err(Error::UnalignedAddress);
+        }
 
         // go through each page level in the virtual address
         let mut table = &mut *self.entries;
         for vpn_i in (size.vpn_idx() + 1..M::LEVELS).rev() {
             // get the current Vpn and the according entry
-            let vpn = M::vpn(vaddr, vpn_i);
+            let vpn = Self::vpn(vaddr, vpn_i);
             let entry = &mut table[vpn];
 
             match entry.kind() {
@@ -162,7 +176,7 @@ impl<M: PagingMode> PageTable<M> {
                 // this entry points to the next table, so traverse the next level
                 Some(EntryKind::Branch(next)) => {
                     let next = phys2virt(next);
-                    table = unsafe { next.as_ptr::<RawPageTable>().as_mut().unwrap() };
+                    table = unsafe { next.as_ptr::<[Entry; 512]>().as_mut().unwrap() };
                 }
                 // this entry is empty, so we need to point it to a new table
                 None => {
@@ -171,7 +185,7 @@ impl<M: PagingMode> PageTable<M> {
                     let table_ptr = pmem::zalloc_order(0)
                         .map_err(Error::Alloc)?
                         .as_ptr()
-                        .cast::<RawPageTable>();
+                        .cast::<[Entry; 512]>();
 
                     // update the current entry to point to the new page
                     entry.0 = ((table_ptr as usize as u64) >> 2) | Entry::VALID;
@@ -181,7 +195,7 @@ impl<M: PagingMode> PageTable<M> {
                     // traverse the newly allocated table
                     table = unsafe {
                         phys2virt(table_ptr)
-                            .as_ptr::<RawPageTable>()
+                            .as_ptr::<[Entry; 512]>()
                             .as_mut()
                             .unwrap()
                     };
@@ -190,7 +204,7 @@ impl<M: PagingMode> PageTable<M> {
         }
 
         // get the entry which we need to overwrite
-        let last_vpn = M::vpn(vaddr, size.vpn_idx());
+        let last_vpn = Self::vpn(vaddr, size.vpn_idx());
         let entry = &mut table[last_vpn];
 
         // if the entry is a leaf, aka already mapped, return an error
@@ -228,7 +242,7 @@ impl<M: PagingMode> PageTable<M> {
         let order = match page_size {
             PageSize::Kilopage => 0,
             PageSize::Megapage => 9,
-            PageSize::Gigapage => unimplemented!(),
+            _ => unimplemented!(),
         };
 
         // loop through the whole mapping and map every required page
@@ -259,7 +273,7 @@ impl<M: PagingMode> PageTable<M> {
         let order = match page_size {
             PageSize::Kilopage => 0,
             PageSize::Megapage => 9,
-            PageSize::Gigapage => unimplemented!(),
+            _ => unimplemented!(),
         };
 
         // loop through the rest of the pages and deallocate them too
@@ -292,13 +306,14 @@ impl<M: PagingMode> PageTable<M> {
             let off = usize::from(vaddr);
             let off = match size {
                 PageSize::Kilopage => off & 0xFFF,
-                PageSize::Megapage => off & 0x1FFFFF,
-                PageSize::Gigapage => off & 0x3FFFFFFF,
+                PageSize::Megapage => off & 0x1F_FFFF,
+                PageSize::Gigapage => off & 0x3FFF_FFFF,
+                PageSize::Terapage => off & 0x7F_FFFF_FFFF,
             };
 
             // get the physical page number specified by the PTE
             // and return the PPN plus the page offset
-            let ppn = PhysAddr::from(((entry.0 as usize >> 10) & 0x0FFF_FFFF_FFFF) << 12);
+            let ppn = PhysAddr::from((entry.0 as usize >> 10) << 12);
             (ppn.offset(off), size)
         })
     }
@@ -333,7 +348,7 @@ impl<M: PagingMode> PageTable<M> {
 
         let entry = loop {
             // get the entry at this level
-            let entry = &table[M::vpn(vaddr, idx)];
+            let entry = &table[Self::vpn(vaddr, idx)];
 
             match entry.kind()? {
                 // we found a mapped address, so break the loop
@@ -341,7 +356,7 @@ impl<M: PagingMode> PageTable<M> {
                 EntryKind::Branch(new_table_ptr) => {
                     // this entry points to the next level, so traverse the next level
                     let new_table = phys2virt(new_table_ptr.as_ptr::<u8>());
-                    table = unsafe { new_table.as_ptr::<RawPageTable>().as_ref().unwrap() };
+                    table = unsafe { new_table.as_ptr::<[Entry; 512]>().as_ref().unwrap() };
 
                     // update the level 1 and 2 table variable to return them later
                     match idx {
@@ -373,6 +388,23 @@ impl<M: PagingMode> PageTable<M> {
             },
         })
     }
+
+    fn vpn(vaddr: VirtAddr, idx: usize) -> usize {
+        usize::from(vaddr) >> (12 + idx * 9) & 0x1FF
+    }
+}
+
+fn set_vpn(vaddr: VirtAddr, idx: usize, val: usize) -> VirtAddr {
+    let vaddr = usize::from(vaddr);
+
+    let mask = (1 << 9) - 1;
+
+    let shamt = idx * 9;
+    let val = (val & mask) << (shamt + 12);
+    let mask = mask << (shamt + 12);
+
+    let vaddr = (vaddr & !mask) | val;
+    VirtAddr::from(vaddr)
 }
 
 impl<M> Drop for PageTable<M> {
@@ -428,7 +460,7 @@ enum EntryKind {
 }
 
 struct DebugPageTable<'page, M: PagingMode> {
-    table: &'page RawPageTable,
+    table: &'page [Entry; 512],
     size: PageSize,
     addr: VirtAddr,
     _mode: PhantomData<M>,
@@ -449,8 +481,9 @@ impl<M: PagingMode> fmt::Debug for DebugPageTable<'_, M> {
                             PageSize::Kilopage => 'K',
                             PageSize::Megapage => 'M',
                             PageSize::Gigapage => 'G',
+                            PageSize::Terapage => 'T',
                         },
-                        M::set_vpn(self.addr, self.size.vpn_idx(), idx),
+                        set_vpn(self.addr, self.size.vpn_idx(), idx),
                         (entry.0 >> 10 << 12) as usize as *const u8,
                         entry.flags(),
                     )?;
@@ -458,13 +491,13 @@ impl<M: PagingMode> fmt::Debug for DebugPageTable<'_, M> {
                 Some(EntryKind::Branch(next)) => {
                     // get access to the next table
                     let table =
-                        unsafe { phys2virt(next).as_ptr::<RawPageTable>().as_ref().unwrap() };
+                        unsafe { phys2virt(next).as_ptr::<[Entry; 512]>().as_ref().unwrap() };
 
                     // walk down the table by deubg printing the new table
                     let debug = DebugPageTable {
                         table,
                         size: self.size.step().unwrap(),
-                        addr: M::set_vpn(self.addr, self.size.vpn_idx(), idx),
+                        addr: set_vpn(self.addr, self.size.vpn_idx(), idx),
                         _mode: PhantomData::<M>,
                     };
                     fmt::Debug::fmt(&debug, f)?;

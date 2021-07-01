@@ -1,41 +1,22 @@
-use super::{Error, PageSize, PagingMode, PhysAddr, Result, VirtAddr};
+use super::{PageSize, PagingMode};
+use riscv::csr::satp;
 
+/// The Sv39 paging mode which supports 39-bit virtual addresses.
 pub enum Sv39 {}
 
 unsafe impl PagingMode for Sv39 {
     const LEVELS: usize = 3;
-
     const TOP_LEVEL_SIZE: PageSize = PageSize::Gigapage;
+    const SATP_MODE: satp::Mode = satp::Mode::Sv39;
+    const MAX_ADDRESS: usize = 0x7F_FFFF_FFFF;
+}
 
-    fn validate_addresses(paddr: PhysAddr, vaddr: VirtAddr, size: PageSize) -> Result<()> {
-        // check if the virtual address is below the maximum
-        if usize::from(vaddr) > 0x7F_FFFF_FFFF {
-            return Err(Error::InvalidAddress);
-        }
+/// The Sv48 paging mode which supports 48-bit virtual addresses.
+pub enum Sv48 {}
 
-        // verify the given addresses
-        if !size.is_aligned(paddr.into()) || !size.is_aligned(vaddr.into()) {
-            return Err(Error::UnalignedAddress);
-        }
-
-        Ok(())
-    }
-
-    fn vpn(vaddr: VirtAddr, idx: usize) -> usize {
-        usize::from(vaddr) >> (12 + idx * 9) & 0x1FF
-    }
-
-    fn set_vpn(vaddr: VirtAddr, idx: usize, val: usize) -> VirtAddr {
-        let vaddr = usize::from(vaddr);
-        let mut vpns = [
-            (vaddr >> 12) & 0x1FF,
-            (vaddr >> 21) & 0x1FF,
-            (vaddr >> 30) & 0x1FF,
-        ];
-
-        vpns[idx] = val;
-
-        let vaddr = (vpns[0] << 12) | (vpns[1] << 21) | (vpns[2] << 30);
-        VirtAddr::from(vaddr)
-    }
+unsafe impl PagingMode for Sv48 {
+    const LEVELS: usize = 4;
+    const TOP_LEVEL_SIZE: PageSize = PageSize::Terapage;
+    const SATP_MODE: satp::Mode = satp::Mode::Sv48;
+    const MAX_ADDRESS: usize = 0xFFFF_FFFF_FFFF;
 }

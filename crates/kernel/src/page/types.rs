@@ -68,6 +68,7 @@ pub enum PageSize {
     Kilopage,
     Megapage,
     Gigapage,
+    Terapage,
 }
 
 impl PageSize {
@@ -86,6 +87,7 @@ impl PageSize {
             PageSize::Kilopage => 4 * unit::KIB,
             PageSize::Megapage => 2 * unit::MIB,
             PageSize::Gigapage => 1 * unit::GIB,
+            PageSize::Terapage => 512 * unit::GIB,
         }
     }
 
@@ -95,6 +97,7 @@ impl PageSize {
             PageSize::Kilopage => 0,
             PageSize::Megapage => 1,
             PageSize::Gigapage => 2,
+            PageSize::Terapage => 3,
         }
     }
 
@@ -104,6 +107,7 @@ impl PageSize {
             PageSize::Kilopage => None,
             PageSize::Megapage => Some(PageSize::Kilopage),
             PageSize::Gigapage => Some(PageSize::Megapage),
+            PageSize::Terapage => Some(PageSize::Gigapage),
         }
     }
 }

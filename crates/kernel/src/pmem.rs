@@ -204,6 +204,7 @@ pub fn alloc_stats() -> allocator::AllocStats {
 
 /// Empty struct that can be used as an [`Allocator`], which will allocate from the global physical
 /// memory allocator.
+#[derive(Clone, Default)]
 pub struct GlobalPhysicalAllocator;
 
 unsafe impl Send for GlobalPhysicalAllocator {}

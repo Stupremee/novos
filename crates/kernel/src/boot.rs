@@ -150,7 +150,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     // allocate the stack for this hart
     let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
 
-    let root_table = table.root_ptr() as u64;
+    let satp = table.satp();
 
     // before enabling paging, we need to convert the global page table to use virtual addresses
     replace_with::replace_with(
@@ -177,11 +177,7 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     drop(table_lock);
 
     // enable paging
-    satp::write(satp::Satp {
-        asid: 0,
-        mode: satp::Mode::Sv39,
-        root_table,
-    });
+    satp::write(satp);
     riscv::asm::sfence(None, None);
 
     // we need to convert the devicetree to use virtual memory
