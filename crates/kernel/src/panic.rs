@@ -42,6 +42,14 @@ fn panic_handler(info: &PanicInfo<'_>) -> ! {
             }
         }
 
+        // before printing the panic, shutdown all other harts
+        if let Some(hart) = hart::try_current() {
+            let mut mask = sbi::HartMask::all_from_base(0);
+            mask.mask &= !(1 << hart.id());
+
+            let _ = sbi::ipi::send_ipi(mask);
+        }
+
         let _ = write!(&mut PanicLogger, "{}", PanicPrinter(info));
 
         sbi::system::fail_shutdown();

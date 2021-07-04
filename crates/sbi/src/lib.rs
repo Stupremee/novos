@@ -90,8 +90,8 @@ impl Error {
 /// and a base, which sets the base hart id.
 #[derive(Debug)]
 pub struct HartMask {
-    pub(crate) base: u64,
-    pub(crate) mask: u64,
+    pub base: u64,
+    pub mask: u64,
 }
 
 impl HartMask {

@@ -45,14 +45,17 @@ pub fn main(fdt: &DeviceTree<'_>) -> ! {
         unit::bytes(pmem::alloc_stats().total),
     );
 
+    for _ in 0..10_000 {}
+
+    unsafe {
+        *(0x1234 as *mut _) = 1u8;
+    }
+
     log_core_online();
 
     log::debug!("{}", pmem::alloc_stats());
 
-    sbi::system::shutdown();
-    //loop {
-    //riscv::asm::wfi();
-    //}
+    sbi::system::shutdown()
 }
 
 /// The entrypoint for all other harts.

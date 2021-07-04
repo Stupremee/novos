@@ -25,8 +25,8 @@ pub struct HartContext {
     trap_stack: NonNull<u8>,
     /// Location to temporarily store the stack pointer inside the interrupt handler.
     temp_sp: usize,
-    /// Bool indicating if this hart was the booting hart.
-    is_bsp: bool,
+    /// The hart id of the hart that booted up the kernel.
+    bsp_id: u64,
     fdt: DeviceTree<'static>,
 }
 
@@ -40,7 +40,13 @@ impl HartContext {
     /// Return if this hart was the booting hart.
     #[inline]
     pub fn is_bsp(&self) -> bool {
-        self.is_bsp
+        self.id == self.bsp_id
+    }
+
+    /// Return the hart id of the boot hart.
+    #[inline]
+    pub fn bsp_id(&self) -> u64 {
+        self.bsp_id
     }
 
     /// Get access to the global devicetree.
@@ -77,7 +83,7 @@ pub fn current() -> &'static HartContext {
 /// the pointer inside the `sscratch` CSR.
 pub unsafe fn init_hart_context(
     hart_id: u64,
-    is_bsp: bool,
+    bsp_id: u64,
     fdt: DeviceTree<'static>,
 ) -> Result<(), allocator::Error> {
     // allocate the trap stack
@@ -91,7 +97,7 @@ pub unsafe fn init_hart_context(
         id: hart_id,
         trap_stack: NonNull::new(trap_stack.as_mut_ptr()).unwrap(),
         temp_sp: 0,
-        is_bsp,
+        bsp_id,
         fdt,
     };
 

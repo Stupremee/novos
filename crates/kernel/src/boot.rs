@@ -236,7 +236,7 @@ unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: *const u8, satp: u64) 
     trap::install_handler();
 
     // initialize hart local storage and hart context
-    hart::init_hart_context(hart_id as u64, true, fdt).unwrap();
+    hart::init_hart_context(hart_id as u64, hart_id as u64, fdt).unwrap();
     hart::init_hart_local_storage().unwrap();
 
     // boot up the other harts
