@@ -6,8 +6,6 @@ pub use buddy::{order_for_size, size_for_order, BuddyAllocator};
 pub mod rangeset;
 pub use rangeset::RangeSet;
 
-pub mod slab;
-
 use crate::unit;
 use core::fmt;
 

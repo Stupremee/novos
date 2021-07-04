@@ -9,7 +9,7 @@ pub mod modes;
 use crate::{
     allocator,
     boot::KERNEL_PHYS_MEM_BASE,
-    pmem::{self, GlobalPhysicalAllocator},
+    pmem::{self, Box, GlobalPhysicalAllocator, Vec},
 };
 use core::{fmt, marker::PhantomData, ops, ptr::NonNull};
 use riscv::{csr::satp, sync::MutexGuard};
@@ -19,9 +19,6 @@ mod sealed {
     impl Sealed for super::modes::Sv39 {}
     impl Sealed for super::modes::Sv48 {}
 }
-
-type Box<T> = alloc::boxed::Box<T, GlobalPhysicalAllocator>;
-type Vec<T> = alloc::vec::Vec<T, GlobalPhysicalAllocator>;
 
 pub type Result<T> = core::result::Result<T, Error>;
 pub type KernelPageTable = PageTable<modes::Sv48>;

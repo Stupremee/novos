@@ -1,16 +1,15 @@
 //! Code to bringup all secondary harts.
 
-use crate::{drivers::DeviceManager, hart, page};
+use crate::{hart, page};
 use devicetree::DeviceTree;
 
 #[repr(C)]
 struct HartArgs {
-    fdt: &'static DeviceTree<'static>,
-    devices: &'static DeviceManager,
+    fdt: DeviceTree<'static>,
 }
 
 /// Boot all harts that are present in the given devicetree.
-pub(super) unsafe fn boot_all_harts(hart_id: usize, fdt: &DeviceTree<'_>, satp: u64) {
+pub(super) unsafe fn boot_all_harts(hart_id: usize, fdt: DeviceTree<'_>, satp: u64) {
     // extract all harts that do not have our id from the devicetree
     let cores = fdt
         .find_nodes("/cpus/cpu@")
@@ -22,7 +21,6 @@ pub(super) unsafe fn boot_all_harts(hart_id: usize, fdt: &DeviceTree<'_>, satp: 
     // go through each hart and try to boot it
     for hart in cores {
         let args = HartArgs {
-            devices: hart::current().devices(),
             fdt: hart::current().fdt(),
         };
 
@@ -86,7 +84,7 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _sp: usize) -> ! {
 unsafe extern "C" fn rust_hart_entry(hart_id: u64, args: &HartArgs) -> ! {
     // initialize hart local storage and hart context
     hart::init_hart_local_storage().unwrap();
-    hart::init_hart_context(hart_id, false, args.devices, args.fdt).unwrap();
+    hart::init_hart_context(hart_id, false, args.fdt).unwrap();
 
     // after setting up everything, we're ready to jump into safe rust code
     crate::hmain()

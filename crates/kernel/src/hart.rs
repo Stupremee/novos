@@ -1,9 +1,11 @@
 //! Hart local storage and context.
 
-use crate::drivers::{plic, DeviceManager};
-use crate::{allocator, page, pmem, unit};
-use alloc::boxed::Box;
-use alloc::vec;
+use crate::drivers::plic;
+use crate::{
+    allocator, page,
+    pmem::{self, Box, Vec},
+    unit,
+};
 use core::mem::ManuallyDrop;
 use core::ptr::NonNull;
 use devicetree::DeviceTree;
@@ -25,8 +27,7 @@ pub struct HartContext {
     temp_sp: usize,
     /// Bool indicating if this hart was the booting hart.
     is_bsp: bool,
-    fdt: &'static DeviceTree<'static>,
-    devices: &'static DeviceManager,
+    fdt: DeviceTree<'static>,
 }
 
 impl HartContext {
@@ -42,15 +43,9 @@ impl HartContext {
         self.is_bsp
     }
 
-    /// Get exclusive access to the global device manager.
-    #[inline]
-    pub fn devices(&self) -> &'static DeviceManager {
-        self.devices
-    }
-
     /// Get access to the global devicetree.
     #[inline]
-    pub fn fdt(&self) -> &'static DeviceTree<'static> {
+    pub fn fdt(&self) -> DeviceTree<'static> {
         self.fdt
     }
 
@@ -83,24 +78,25 @@ pub fn current() -> &'static HartContext {
 pub unsafe fn init_hart_context(
     hart_id: u64,
     is_bsp: bool,
-    devices: &'static DeviceManager,
-    fdt: &'static DeviceTree<'static>,
+    fdt: DeviceTree<'static>,
 ) -> Result<(), allocator::Error> {
     // allocate the trap stack
-    let mut stack = ManuallyDrop::new(vec![0u8; TRAP_STACK_SIZE]);
+    let mut trap_stack = ManuallyDrop::new(Vec::<u8>::with_capacity_in(
+        TRAP_STACK_SIZE,
+        pmem::GlobalPhysicalAllocator,
+    ));
 
     // create the hart context and write it to the page
     let ctx = HartContext {
         id: hart_id,
-        trap_stack: NonNull::new(stack.as_mut_ptr().add(TRAP_STACK_SIZE)).unwrap(),
+        trap_stack: NonNull::new(trap_stack.as_mut_ptr()).unwrap(),
         temp_sp: 0,
         is_bsp,
-        devices,
         fdt,
     };
 
     // box up the context so it's stored on the heap
-    let ptr = Box::into_raw(Box::new(ctx));
+    let ptr = Box::into_raw(Box::new_in(ctx, pmem::GlobalPhysicalAllocator));
 
     // store the address inside the sscratch register to make it
     // available everywhere on this hart

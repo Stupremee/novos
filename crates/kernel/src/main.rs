@@ -25,7 +25,6 @@ pub mod pmem;
 pub mod symbols;
 pub mod trap;
 pub mod unit;
-pub mod vmem;
 
 mod panic;
 
@@ -37,16 +36,6 @@ use devicetree::DeviceTree;
 
 /// The kernel entrypoint for the booting hart. At this point paging is set up.
 pub fn main(fdt: &DeviceTree<'_>) -> ! {
-    // initialize all devices
-    unsafe {
-        hart::current().devices().init();
-    }
-
-    // initialize the global logging system, if there's a logging device available
-    if hart::current().devices().logger().is_some() {
-        log::init_log(GlobalLog).map_err(|_| ()).unwrap();
-    }
-
     // print the hello message with some statistics
     let cores = fdt.find_nodes("/cpus/cpu@").count();
     log::info!(
@@ -77,8 +66,8 @@ pub fn hmain() -> ! {
 
 fn log_core_online() {
     // get a human readable representation of the ISA
-    let node = hart::current()
-        .fdt()
+    let fdt = hart::current().fdt();
+    let node = fdt
         .cpus()
         .children()
         .find(|node| node.unit_address() == Some(hart::current().id()));
@@ -134,16 +123,16 @@ fn log_core_online() {
     );
 }
 
-/// A global logger that uses the hart local context to access the Logger.
-pub struct GlobalLog;
+use alloc::alloc::{GlobalAlloc, Layout};
 
-impl log::Logger for GlobalLog {
-    fn write_str(&self, x: &str) -> fmt::Result {
-        let devices = hart::current().devices();
-        if let Some(dev) = devices.logger() {
-            dev.write_str(x)?;
-        }
+struct MyAllocator;
 
-        Ok(())
+unsafe impl GlobalAlloc for MyAllocator {
+    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
+        core::ptr::null_mut()
     }
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
+
+#[global_allocator]
+static A: MyAllocator = MyAllocator;

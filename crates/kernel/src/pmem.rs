@@ -13,6 +13,11 @@ use crate::page;
 use devicetree::DeviceTree;
 use riscv::sync::Mutex;
 
+/// A `Box` that will use the global physical memory allocator to allocate memory.
+pub type Box<T> = alloc::boxed::Box<T, GlobalPhysicalAllocator>;
+/// A `Vec` that will use the global physical memory allocator to allocate memory.
+pub type Vec<T> = alloc::vec::Vec<T, GlobalPhysicalAllocator>;
+
 /// Any error that is related to physical memory.
 #[derive(Debug)]
 pub enum Error {

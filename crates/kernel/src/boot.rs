@@ -5,14 +5,14 @@ mod reloc;
 
 use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
-    drivers, hart,
-    page::{self, Flags, KernelPageTable, PageSize, PhysAddr, VirtAddr},
+    hart,
+    page::{Flags, KernelPageTable, PageSize, PhysAddr, VirtAddr},
     pmem, symbols, trap, unit,
 };
 use alloc::boxed::Box;
 use core::slice;
 use devicetree::DeviceTree;
-use riscv::{csr::satp, sync::Mutex};
+use riscv::sync::Mutex;
 
 #[doc(hidden)]
 pub(crate) static PAGE_TABLE: Mutex<Option<KernelPageTable>> = Mutex::new(None);
@@ -176,19 +176,12 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     // drop the page table to unlock the lock
     drop(table_lock);
 
-    // enable paging
-    satp::write(satp);
-    riscv::asm::sfence(None, None);
-
-    // we need to convert the devicetree to use virtual memory
-    let fdt = DeviceTree::from_ptr(page::phys2virt(fdt.as_ptr()).as_ptr()).unwrap();
-
     // jump to rust code using the trampoline
     entry_trampoline(
         hart_id,
-        page::phys2virt(&fdt as *const _).as_ptr(),
+        fdt.as_ptr().add(KERNEL_PHYS_MEM_BASE),
         stack.into(),
-        rust_trampoline as usize,
+        satp.as_bits(),
     )
 }
 
@@ -196,14 +189,17 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 #[naked]
 unsafe extern "C" fn entry_trampoline(
     _hart_id: usize,
-    _fdt: *const DeviceTree<'_>,
+    _fdt: *const u8,
     _new_stack: usize,
-    _dst: usize,
+    _satp: usize,
 ) -> ! {
     #[rustfmt::skip]
     asm!("
         # This trampoline code is responsible for switchting to a new stack, that
         # is located in virtual memory, by copying the old stack into the new one.
+        csrw satp, a3
+        sfence.vma
+
         mv t0, sp
         mv sp, a2
         mv t1, a2
@@ -224,34 +220,30 @@ unsafe extern "C" fn entry_trampoline(
         # Jump into rust code again
     copy_stack_done:
         csrr a2, satp
-        jr a3
+        j {dst}
     ",
+    dst = sym rust_trampoline,
     options(noreturn));
 }
 
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`.
 ///
 /// This function also brings up the other harts.
-unsafe extern "C" fn rust_trampoline(
-    hart_id: usize,
-    fdt: &'static DeviceTree<'static>,
-    satp: u64,
-) -> ! {
+unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: *const u8, satp: u64) -> ! {
+    let fdt = DeviceTree::from_ptr(fdt).unwrap();
+
     // install the interrupt handler
     trap::install_handler();
 
-    // create the devicemanager
-    let devices = Box::leak(Box::new(drivers::DeviceManager::from_devicetree(fdt)));
-
     // initialize hart local storage and hart context
-    hart::init_hart_context(hart_id as u64, true, devices, fdt).unwrap();
+    hart::init_hart_context(hart_id as u64, true, fdt).unwrap();
     hart::init_hart_local_storage().unwrap();
 
     // boot up the other harts
     harts::boot_all_harts(hart_id, fdt, satp);
 
     // jump into safe rust code
-    crate::main(fdt)
+    crate::main(&fdt)
 }
 
 /// The entrypoint for the whole kernel.

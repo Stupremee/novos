@@ -1,6 +1,5 @@
 //! Trap handler
 
-use crate::hart;
 use riscv::{csr, trap::Trap};
 
 /// Installs the global trap handler by writing it's address
@@ -41,19 +40,19 @@ pub extern "C" fn trap_handler(
             // If there is a PLIC, and it has a pending interrupt,
             // we pass it on to our devicemanager which will redirect the interrupt
             // to the corresponding device.
-            let dev = hart::current().devices();
-            if let Some(irq) = dev
-                .plic()
-                .as_mut()
-                .and_then(|p| p.claim(hart::current().plic_context()))
-            {
-                match hart::current().devices().handle_interrupt(irq) {
-                    Ok(()) => {}
-                    Err(err) => {
-                        log::warn!("{} to run interrupt handler: {}", "Failed".yellow(), err)
-                    }
-                }
-            }
+            //let dev = hart::current().devices();
+            //if let Some(irq) = dev
+            //.plic()
+            //.as_mut()
+            //.and_then(|p| p.claim(hart::current().plic_context()))
+            //{
+            //match hart::current().devices().handle_interrupt(irq) {
+            //Ok(()) => {}
+            //Err(err) => {
+            //log::warn!("{} to run interrupt handler: {}", "Failed".yellow(), err)
+            //}
+            //}
+            //}
         }
         Trap::SupervisorTimerInterrupt => {
             log::debug!("got timer interrupt");

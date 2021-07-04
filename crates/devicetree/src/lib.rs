@@ -30,6 +30,7 @@ impl From<PHandle> for u32 {
 }
 
 /// The central structure for working with a flattened device tree.
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct DeviceTree<'tree> {
     buf: &'tree [u8],
