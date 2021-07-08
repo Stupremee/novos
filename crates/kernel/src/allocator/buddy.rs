@@ -1,5 +1,5 @@
 use super::{align_up, AllocStats, Error, Result};
-use crate::page::phys2virt;
+use crate::memmap::phys2virt;
 use core::{cmp, ptr::NonNull};
 
 /// The maximum order for the buddy allocator (inclusive).

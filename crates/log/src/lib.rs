@@ -13,6 +13,7 @@ pub use value::Value;
 mod macros;
 
 use alloc::boxed::Box;
+use core::cell::UnsafeCell;
 use core::fmt::{self, Write};
 use core::marker::PhantomData;
 use core::time::Duration;
@@ -21,9 +22,9 @@ use owo_colors::{colors, Color, OwoColorize};
 use riscv::sync::Mutex;
 
 const LOGGER_SIZE: usize = 8;
-static LOG: GlobalLogger = GlobalLogger(Mutex::new(None));
+static LOG: GlobalLogger = GlobalLogger(UnsafeCell::new(Mutex::new(None)));
 
-struct GlobalLogger(Mutex<Option<Value<dyn Logger, { LOGGER_SIZE }>>>);
+struct GlobalLogger(UnsafeCell<Mutex<Option<Value<dyn Logger, { LOGGER_SIZE }>>>>);
 
 unsafe impl Send for GlobalLogger {}
 unsafe impl Sync for GlobalLogger {}
@@ -138,7 +139,8 @@ impl<L: Level> fmt::Write for LogWriter<'_, L> {
 
 #[doc(hidden)]
 pub fn log<L: Level>(module: &str, args: fmt::Arguments<'_>) {
-    if let Some(log) = &mut *LOG.0.lock() {
+    let mut lock = unsafe { LOG.0.get().as_ref().unwrap() }.lock();
+    if let Some(log) = &mut *lock {
         let mut writer = LogWriter {
             time: riscv::asm::time(),
             prefix: true,
@@ -156,9 +158,17 @@ pub fn log<L: Level>(module: &str, args: fmt::Arguments<'_>) {
 /// Returns `Ok` on success, and `Err` with the given logger if the logger was already initialized,
 /// or the given logger was to big to be put into a global.
 pub fn init_log<L: Logger + 'static>(log: L) -> Result<(), L> {
-    let mut lock = LOG.0.lock();
+    let mut lock = unsafe { LOG.0.get().as_ref().unwrap() }.lock();
     let val = Value::<dyn Logger, { LOGGER_SIZE }>::new(log)?;
     *lock = Some(val);
 
+    Ok(())
+}
+
+/// Overwrites the global logger without acquiring the lock or other safety checks.
+pub unsafe fn override_log<L: Logger + 'static>(log: L) -> Result<(), L> {
+    let val = Value::<dyn Logger, { LOGGER_SIZE }>::new(log)?;
+    let val = Mutex::new(Some(val));
+    LOG.0.get().write(val);
     Ok(())
 }

@@ -2,7 +2,7 @@
 
 use crate::drivers::plic;
 use crate::{
-    allocator, page,
+    allocator, memmap,
     pmem::{self, Box, Vec},
     unit,
 };
@@ -119,7 +119,7 @@ pub unsafe fn init_hart_local_storage() -> Result<(), allocator::Error> {
 
     // allocate new memory for the tdata section
     let order = allocator::order_for_size(len);
-    let new = page::phys2virt(pmem::alloc_order(order)?.as_ptr()).as_ptr::<u8>();
+    let new = memmap::phys2virt(pmem::alloc_order(order)?.as_ptr()).as_ptr::<u8>();
     let new = core::slice::from_raw_parts_mut(new, len);
 
     // copy the memory to the newly allocated data

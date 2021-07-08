@@ -4,12 +4,14 @@ use core::alloc::{AllocError, Allocator, Layout};
 use core::ptr::NonNull;
 use core::{array, mem, ptr, slice};
 
-use crate::allocator::{
-    self,
-    rangeset::{self, Range},
-    BuddyAllocator, RangeSet,
+use crate::{
+    allocator::{
+        self,
+        rangeset::{self, Range},
+        BuddyAllocator, RangeSet,
+    },
+    memmap, page,
 };
-use crate::page;
 use devicetree::DeviceTree;
 use riscv::sync::Mutex;
 
@@ -107,7 +109,7 @@ unsafe impl Allocator for PhysicalAllocator {
         // perform the allocation
         match self.0.lock().allocate(order) {
             Ok(ptr) => {
-                let ptr = page::phys2virt(ptr.as_ptr());
+                let ptr = memmap::phys2virt(ptr.as_ptr());
                 let slice = ptr::slice_from_raw_parts_mut(ptr.as_ptr(), size);
                 Ok(unsafe { NonNull::new_unchecked(slice) })
             }
@@ -128,7 +130,7 @@ unsafe impl Allocator for PhysicalAllocator {
         let order = allocator::order_for_size(layout.size());
         let ptr = page::root()
             .translate(ptr.as_ptr().into())
-            .map(|(a, _)| NonNull::new(a.as_ptr()).unwrap())
+            .map(|(a, _, _)| NonNull::new(a.as_ptr()).unwrap())
             .unwrap_or(ptr);
 
         // perform the deallocation
@@ -168,7 +170,7 @@ pub fn zalloc() -> Result<NonNull<u8>, allocator::Error> {
 #[inline]
 pub fn zalloc_order(order: usize) -> Result<NonNull<u8>, allocator::Error> {
     let page = alloc_order(order)?;
-    let page_ptr = page::phys2virt(page.as_ptr());
+    let page_ptr = memmap::phys2virt(page.as_ptr());
 
     let slice = unsafe {
         slice::from_raw_parts_mut(

@@ -5,8 +5,10 @@ use devicetree::DeviceTree;
 
 #[repr(C)]
 struct HartArgs {
-    fdt: DeviceTree<'static>,
+    satp: u64,
+    vstack: u64,
     boot_hart: u64,
+    fdt: DeviceTree<'static>,
 }
 
 /// Boot all harts that are present in the given devicetree.
@@ -21,26 +23,21 @@ pub(super) unsafe fn boot_all_harts(hart_id: usize, fdt: DeviceTree<'_>, satp: u
 
     // go through each hart and try to boot it
     for hart in cores {
-        let args = HartArgs {
-            fdt: hart::current().fdt(),
-            boot_hart: hart_id as u64,
-        };
-
         // allocate stack in physical memory, since it will be mapped in later by the hart
         let (pstack, vstack) = super::alloc_kernel_stack(&mut *table, hart as u64);
 
-        // write the hart arguments to the stack
-        let pstack = pstack.as_ptr::<HartArgs>().offset(-1).cast::<usize>();
-
+        // write the required arguments onto the new stack
+        let pstack = pstack.as_ptr::<HartArgs>().offset(-1);
         let vstack = vstack.as_ptr::<HartArgs>().offset(-1);
+
+        let args = HartArgs {
+            fdt: hart::current().fdt(),
+            boot_hart: hart_id as u64,
+            satp,
+            vstack: vstack as u64,
+        };
+
         vstack.write(args);
-        let vstack = vstack.cast::<usize>();
-
-        // write the satp value on the new stack
-        vstack.offset(-1).write(satp as usize);
-
-        // write the virtual stack to the new stack
-        vstack.offset(-2).write(vstack as usize);
 
         // try to start the hart
         match sbi::hsm::start(hart as usize, hart_entry as usize, pstack as usize) {
@@ -64,33 +61,36 @@ unsafe extern "C" fn hart_entry(_hart_id: usize, _sp: usize) -> ! {
         # Load arguments from stack
         #   t0: satp
         #   t1: virtual stack
-        ld t0, -8(a1)
-        ld t1, -16(a1)
+        ld t0, 0(a1)
+        ld t1, 8(a1)
 
-        # Enable paging
-        csrw satp, t0
-        sfence.vma
-
-        # Load the stack and jump into rust code
+        # Load the virtual stack and arguments
         mv sp, t1
-
-        # The new stack also points to the hart arguments
         mv a1, t1
-        j {}
+
+        # Jump into rust code by enabling paging and trapping to the function
+        lla t1, {}
+        csrw stvec, t1
+
+        sfence.vma
+        nop
     ",
         sym rust_hart_entry,
         options(noreturn)
     )
 }
 
+#[repr(align(4))]
 unsafe extern "C" fn rust_hart_entry(hart_id: u64, args: &HartArgs) -> ! {
+    log::debug!("HI");
+    loop {}
     // initialize hart local storage and hart context
-    hart::init_hart_local_storage().unwrap();
-    hart::init_hart_context(hart_id, args.boot_hart, args.fdt).unwrap();
+    //hart::init_hart_local_storage().unwrap();
+    //hart::init_hart_context(hart_id, args.boot_hart, args.fdt).unwrap();
 
-    // install trap handler
-    trap::install_handler();
+    //// install trap handler
+    //trap::install_handler();
 
-    // after setting up everything, we're ready to jump into safe rust code
+    //// after setting up everything, we're ready to jump into safe rust code
     crate::hmain()
 }

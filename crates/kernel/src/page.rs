@@ -8,7 +8,7 @@ pub mod modes;
 
 use crate::{
     allocator,
-    boot::KERNEL_PHYS_MEM_BASE,
+    memmap::phys2virt,
     pmem::{self, Box, GlobalPhysicalAllocator, Vec},
 };
 use core::{fmt, marker::PhantomData, ops, ptr::NonNull};
@@ -31,23 +31,6 @@ pub enum Error {
     UnalignedAddress,
     AlreadyMapped,
     Alloc(allocator::Error),
-}
-
-/// Convert a physical address into a virtual address.
-pub fn phys2virt(paddr: impl Into<PhysAddr>) -> VirtAddr {
-    let paddr: usize = paddr.into().into();
-
-    // FIXME: This is currently safe, since this is the only access to satp.
-    // However in the future there must be some global lock to provide
-    // safe access the the global page_table.
-    let mode = unsafe { riscv::csr::satp::read().mode };
-
-    // if paging is not enabled, return the physical address.
-    if matches!(mode, riscv::csr::satp::Mode::Bare) {
-        return paddr.into();
-    }
-
-    VirtAddr::from(paddr + KERNEL_PHYS_MEM_BASE)
 }
 
 /// A trait that represents any supported paging mode, and is used in a [`PageTable`] to specify
@@ -151,7 +134,7 @@ impl<M: PagingMode> PageTable<M> {
         }
 
         // validate the addresses
-        if usize::from(vaddr) >= M::MAX_ADDRESS {
+        if usize::from(vaddr) >= M::MAX_ADDRESS || usize::from(vaddr) & !M::MAX_ADDRESS != 0 {
             return Err(Error::InvalidAddress);
         }
 
@@ -263,7 +246,7 @@ impl<M: PagingMode> PageTable<M> {
     /// The count *must* be the same number used for allocation.
     pub unsafe fn free(&mut self, vaddr: VirtAddr, count: usize) -> Result<()> {
         // translate the first page manually, to get the page size
-        let (_, page_size) = self.translate(vaddr).ok_or(Error::InvalidAddress)?;
+        let (_, page_size, _) = self.translate(vaddr).ok_or(Error::InvalidAddress)?;
         let end = usize::from(vaddr) + (page_size.size() * count);
 
         // the order that will be used for the buddy allocator for freeing the pages
@@ -276,7 +259,7 @@ impl<M: PagingMode> PageTable<M> {
         // loop through the rest of the pages and deallocate them too
         for page in (usize::from(vaddr)..end).step_by(page_size.size()) {
             // translate the address to find the physaddr which we need for deallocation
-            let (paddr, _) = self.translate(page.into()).unwrap();
+            let (paddr, _, _) = self.translate(page.into()).unwrap();
 
             // unmap the page
             assert!(self.unmap(page.into())?);
@@ -294,7 +277,7 @@ impl<M: PagingMode> PageTable<M> {
 
     /// Translate the virtual address and return the physical address it's pointing to, and the
     /// size of the mapped page.
-    pub fn translate(&self, vaddr: VirtAddr) -> Option<(PhysAddr, PageSize)> {
+    pub fn translate(&self, vaddr: VirtAddr) -> Option<(PhysAddr, PageSize, Flags)> {
         self.traverse(vaddr).map(|Mapping { entry, size, .. }| {
             // read the PTE from the found address
             let entry = unsafe { entry.as_ref().unwrap() };
@@ -311,7 +294,7 @@ impl<M: PagingMode> PageTable<M> {
             // get the physical page number specified by the PTE
             // and return the PPN plus the page offset
             let ppn = PhysAddr::from((entry.0 as usize >> 10) << 12);
-            (ppn.offset(off), size)
+            (ppn.offset(off), size, entry.flags())
         })
     }
 
@@ -387,7 +370,7 @@ impl<M: PagingMode> PageTable<M> {
     }
 
     fn vpn(vaddr: VirtAddr, idx: usize) -> usize {
-        usize::from(vaddr) >> (12 + idx * 9) & 0x1FF
+        (usize::from(vaddr) >> (12 + idx * 9)) & 0x1FF
     }
 }
 

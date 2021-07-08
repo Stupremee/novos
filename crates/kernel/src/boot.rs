@@ -3,9 +3,10 @@
 mod harts;
 mod reloc;
 
-use crate::allocator::{self, order_for_size, size_for_order, PAGE_SIZE};
 use crate::{
+    allocator::{self, order_for_size, size_for_order, PAGE_SIZE},
     hart,
+    memmap::{self, KERNEL_PHYS_MEM_BASE, KERNEL_STACK_BASE, KERNEL_STACK_SIZE},
     page::{Flags, KernelPageTable, PageSize, PhysAddr, VirtAddr},
     pmem, symbols, trap, unit,
 };
@@ -16,20 +17,6 @@ use riscv::sync::Mutex;
 
 #[doc(hidden)]
 pub(crate) static PAGE_TABLE: Mutex<Option<KernelPageTable>> = Mutex::new(None);
-
-/// The base virtual addresses where the stack for every hart is located.
-pub const KERNEL_STACK_BASE: usize = 0x001D_DD00_0000;
-
-/// The stack size for each hart.
-pub const KERNEL_STACK_SIZE: usize = 1024 * 1024;
-
-/// The virtual address at which the physical memory is mapped in, such that adding
-/// this constant to any "real" physaddr returns the new physaddr which can be used if
-/// paging is activaed.
-pub const KERNEL_PHYS_MEM_BASE: usize = 0x001F_FF00_0000;
-
-/// The base virtual address where the allocator will start allocating virtual memory.
-pub const KERNEL_VMEM_ALLOC_BASE: usize = 0x0000_AA00_0000;
 
 struct SbiLogger;
 impl log::Logger for SbiLogger {
@@ -115,13 +102,24 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
             .unwrap();
     }
 
+    // get the base address of the real memory location where the kernel currently is
+    let (base, _) = symbols::kernel_range();
+    let base = base as usize;
+
     // map the kernel sections
-    let mut map_section = |(start, end): (*mut u8, *mut u8), perm: Flags| {
-        for page in (start as usize..end as usize).step_by(PAGE_SIZE) {
+    let mut map_section = |(o_start, o_end): (*mut u8, *mut u8), perm: Flags| {
+        // only get the offset of this section
+        let (start, end) = (o_start as usize - base, o_end as usize - base);
+
+        for section_off in (start as usize..end as usize).step_by(PAGE_SIZE) {
+            // map the physical page to the same offset in the higher half of address space
+            let phys = base + section_off;
+            let virt = memmap::HIGHER_HALF_START + section_off;
+
             table
                 .map(
-                    page.into(),
-                    page.into(),
+                    phys.into(),
+                    virt.into(),
                     PageSize::Kilopage,
                     perm | Flags::ACCESSED | Flags::DIRTY,
                 )
@@ -129,26 +127,20 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
         }
     };
 
-    assert_eq!(reloc::relocate(0x8020_0000), 0);
-
-    //map_section(
-    //(0x8000_0000 as *mut u8, 0x8020_0000 as *mut u8),
-    //Flags::READ | Flags::EXEC,
-    //);
     map_section(symbols::text_range(), Flags::READ | Flags::EXEC);
     map_section(symbols::rodata_range(), Flags::READ);
     map_section(symbols::data_range(), Flags::READ | Flags::WRITE);
     map_section(symbols::tdata_range(), Flags::READ | Flags::WRITE);
     map_section(symbols::bss_range(), Flags::READ | Flags::WRITE);
     map_section(symbols::stack_range(), Flags::READ | Flags::WRITE);
-    // FIXME: Link and map sections properly!
-    //map_section(
-    //symbols::kernel_range(),
-    //Flags::READ | Flags::WRITE | Flags::EXEC,
-    //);
 
     // allocate the stack for this hart
-    let (_, stack) = alloc_kernel_stack(table, hart_id as u64);
+    let (phys_stack, virt_stack) = alloc_kernel_stack(table, hart_id as u64);
+
+    // calculate the address for the function to trampoline into
+    let real_addr = rust_trampoline as usize;
+    let off = real_addr - base;
+    let virt_addr = memmap::HIGHER_HALF_START + off;
 
     let satp = table.satp();
 
@@ -176,12 +168,19 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
     // drop the page table to unlock the lock
     drop(table_lock);
 
+    // set the physical memory offset
+    memmap::set_phymem_offset(KERNEL_PHYS_MEM_BASE);
+
+    // relocate kernel before jumping to virtual memory
+    assert_eq!(reloc::relocate(memmap::HIGHER_HALF_START), 0);
+
     // jump to rust code using the trampoline
     entry_trampoline(
         hart_id,
         fdt.as_ptr().add(KERNEL_PHYS_MEM_BASE),
-        stack.into(),
         satp.as_bits(),
+        virt_stack.into(),
+        virt_addr,
     )
 }
 
@@ -190,57 +189,47 @@ unsafe extern "C" fn _before_main(hart_id: usize, fdt: *const u8) -> ! {
 unsafe extern "C" fn entry_trampoline(
     _hart_id: usize,
     _fdt: *const u8,
-    _new_stack: usize,
     _satp: usize,
+    _virt_stack: usize,
+    _dst: usize,
 ) -> ! {
     #[rustfmt::skip]
     asm!("
-        # This trampoline code is responsible for switchting to a new stack, that
-        # is located in virtual memory, by copying the old stack into the new one.
-        csrw satp, a3
-        sfence.vma
+         # Load new stack
+         mv sp, a3
 
-        mv t0, sp
-        mv sp, a2
-        mv t1, a2
-        lla t2, __stack_end
+         # Prepare the stvec register, so after enabling paging, we trap into out target function
+         csrw stvec, a4
 
-    copy_stack:
-        bleu t2, t0, copy_stack_done
+         # Enable paging. This will trap because this code here is not mapped anymore.
+         csrw satp, a2
+         sfence.vma
+         nop
 
-        addi t2, t2, -8
-        addi t1, t1, -8
-        addi sp, sp, -8
-
-        ld t3, (t2)
-        sd t3, (t1)
-        
-        j copy_stack
-
-        # Jump into rust code again
-    copy_stack_done:
-        csrr a2, satp
-        j {dst}
     ",
-    dst = sym rust_trampoline,
     options(noreturn));
 }
 
 /// Wrapper around the `main` call to avoid marking `main` as `extern "C"`.
 ///
 /// This function also brings up the other harts.
+#[repr(align(4))]
 unsafe extern "C" fn rust_trampoline(hart_id: usize, fdt: *const u8, satp: u64) -> ! {
     let fdt = DeviceTree::from_ptr(fdt).unwrap();
+    hart::init_hart_context(hart_id as u64, hart_id as u64, fdt).unwrap();
 
     // install the interrupt handler
     trap::install_handler();
 
+    // override the logger so it will use virtual addresses too
+    log::override_log(SbiLogger).map_err(|_| ()).unwrap();
+
     // initialize hart local storage and hart context
-    hart::init_hart_context(hart_id as u64, hart_id as u64, fdt).unwrap();
     hart::init_hart_local_storage().unwrap();
 
+    // FIXME: Currently broken
     // boot up the other harts
-    harts::boot_all_harts(hart_id, fdt, satp);
+    // harts::boot_all_harts(hart_id, fdt, satp);
 
     // jump into safe rust code
     crate::main(&fdt)

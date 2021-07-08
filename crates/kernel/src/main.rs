@@ -20,6 +20,7 @@ pub mod allocator;
 pub mod boot;
 pub mod drivers;
 pub mod hart;
+pub mod memmap;
 pub mod page;
 pub mod pmem;
 pub mod symbols;
@@ -45,11 +46,9 @@ pub fn main(fdt: &DeviceTree<'_>) -> ! {
         unit::bytes(pmem::alloc_stats().total),
     );
 
-    for _ in 0..10_000 {}
-
-    unsafe {
-        *(0x1234 as *mut _) = 1u8;
-    }
+    //unsafe {
+    //*(0x1234 as *mut _) = 1u8;
+    //}
 
     log_core_online();
 

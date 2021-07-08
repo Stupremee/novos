@@ -7,12 +7,14 @@ stdenv.mkDerivation rec {
   src = fetchFromGitHub {
     owner = "riscv";
     repo = "riscv-isa-sim";
-    rev = "218777888c952c0846f8d186ac664dcd26c33c79";
-    sha256 = "sha256-55UsAlyWu3+2/eP88wi+gwPi8PniVNt46nT2KbDb+Ag=";
+    rev = "cc38be9991f3abd0831d141ebff8b4fd7a4990ea";
+    sha256 = "sha256-REtvCRFmv1XZPCMO5yxGUJcLWfnlr8zh76QnYa9CjD4=";
   };
 
   nativeBuildInputs = [ dtc ];
   enableParallelBuilding = true;
+
+  RISCV_ENABLE_DIRTY = 1;
 
   postPatch = ''
     patchShebangs scripts/*.sh
